@@ -1,20 +1,24 @@
-# Ignore all files and folders (i.e. allowlist-strategy)
-/*
+# Ignore all files; un-ignore directories for traversal (allowlist-strategy)
+/**/*
+!**/
 
 # Except the following files...
 
 # Boilerplate
-!/.github/
-!.gitignore
-!LICENSE
-!README.md
+!/.gitignore
+!/LICENSE
+!/README.md
 
 # Editor config
-!/.vscode/
+!/.vscode/extensions.json
+!/.vscode/settings.json
 
 # Actual source files
-!Dockerfile
-!tarclone.sh
+!/Dockerfile
+!/tarclone.sh
+
+# Tests
+!/test/smoke.sh
 
 # Example files
 !/example/
