@@ -1,0 +1,20 @@
+# Ignore all files and folders (i.e. allowlist-strategy)
+/*
+
+# Except the following files...
+
+# Boilerplate
+!/.github/
+!.gitignore
+!LICENSE
+!README.md
+
+# Editor config
+!/.vscode/
+
+# Actual source files
+!Dockerfile
+!tarclone.sh
+
+# Example files
+!/example/
