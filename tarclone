@@ -459,7 +459,13 @@ main() {
   UPLOADED_PARTIAL=1
 
   if [[ "$TARCLONE_VERIFY_CHECKSUM" == "true" ]]; then
-    log_info "Verifying sha256 (reads the file back from the remote)"
+    # Verification reads the whole archive back from the remote and hashes it
+    # locally — universal across every rclone backend, but it doubles egress on a
+    # large archive. Future optimization: for backends that expose a server-side
+    # checksum, prefer `rclone hashsum sha256` / `rclone check` to compare without
+    # re-downloading, and fall back to this read-back only when the backend can't
+    # hash server-side. Kept simple deliberately until that's worth the branch.
+    log_info "Verifying sha256"
     local lsum rsum
     read -r lsum _ < <(sha256sum "$LOCAL_ARCHIVE")
     rsum="$(rc cat "$REMOTE_PARTIAL" | sha256sum)"
