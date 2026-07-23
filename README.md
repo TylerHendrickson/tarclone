@@ -190,6 +190,17 @@ bind-mount your certificate store into the container, e.g.:
 - `docker run -v /etc/ssl/certs:/etc/ssl/certs:ro ...`
 - In your `docker-compose.yml` service: `volumes: [/etc/ssl/certs:/etc/ssl/certs:ro]`
 
+#### Verifying images
+
+Every published image carries a signed [SLSA build provenance](https://slsa.dev/) attestation
+and an SPDX SBOM, attached in the registry as OCI referrers keyed to the image digest.
+
+To verify them with the GitHub CLI:
+
+```bash
+gh attestation verify oci://ghcr.io/tylerhendrickson/tarclone:latest --owner TylerHendrickson
+```
+
 ## Features
 
 - **Zero downtime.** tar reads the read-only source directly; nothing is stopped.

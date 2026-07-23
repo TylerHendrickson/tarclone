@@ -57,6 +57,10 @@ jobs:
       - test
     permissions:
       packages: write
+      # Sign build provenance + SBOM as OCI referrer attestations keyed to the
+      # published digest (id-token for the Sigstore signing identity).
+      attestations: write
+      id-token: write
     services:
       registry:
         image: registry:2
@@ -149,3 +153,49 @@ jobs:
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
           docker buildx imagetools create "${args[@]}" "$SRC"
+
+      # Supply-chain attestations. These attach as OCI referrers keyed to the
+      # image DIGEST, not a tag — so because promote preserves the digest, they
+      # automatically cover the version tags release.yml later creates, with no
+      # release-time work. Referrers also leave the image index untouched, unlike
+      # buildx's inline provenance/sbom, so the clean imagetools copy above holds.
+      - name: Resolve published digest
+        id: digest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SRC: ${{ env.LOCAL_IMAGE }}
+        run: |
+          # imagetools copied SRC to GHCR byte-for-byte, so the local index digest
+          # is the GHCR digest. subject-name must be the lowercased GHCR repo.
+          digest="$(docker buildx imagetools inspect "$SRC" --format '{{.Manifest.Digest}}')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "name=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.digest.outputs.name }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate SBOM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          # Scan the published GHCR image by digest (HTTPS, authenticated by the
+          # login step) rather than the plaintext local registry.
+          image: ${{ steps.digest.outputs.name }}@${{ steps.digest.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest SBOM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ steps.digest.outputs.name }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
