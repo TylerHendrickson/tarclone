@@ -8,6 +8,7 @@
 !/.gitignore
 !/LICENSE
 !/README.md
+!/SECURITY.md
 
 # Editor config
 !/.vscode/extensions.json
@@ -16,6 +17,9 @@
 # Actual source files
 !/Dockerfile
 !/tarclone
+
+# Security scanning
+!/.trivyignore
 
 # Tests
 !/test/smoke.sh

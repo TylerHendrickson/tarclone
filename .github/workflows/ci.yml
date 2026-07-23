@@ -74,6 +74,8 @@ jobs:
       # published digest (id-token for the Sigstore signing identity).
       attestations: write
       id-token: write
+      # Upload Trivy scan results to the repo's code-scanning (Security) tab.
+      security-events: write
     services:
       registry:
         image: registry:2
@@ -145,6 +147,50 @@ jobs:
 
       - name: Image smoke — backup round-trip
         run: TARCLONE_IMAGE="$LOCAL_IMAGE" ./test/smoke.sh
+
+      # Scan the exact image we just tested (and are about to publish) for known
+      # OS/package vulnerabilities. Runs on PRs too — a vulnerable base image is
+      # caught before merge, not after it ships. TRIVY_INSECURE lets Trivy pull
+      # from the plaintext job-local registry.
+      - name: Scan image for vulnerabilities (SARIF)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_INSECURE: "true"
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          trivyignores: .trivyignore
+
+      # Surface findings in the repo's Security tab. Skipped on fork PRs, whose
+      # read-only token can't write security events; the failing gate below still
+      # runs, so forks are still blocked on fixable criticals.
+      - name: Upload scan results to GitHub Security
+        if: >-
+          github.event_name == 'push' ||
+          github.event.pull_request.head.repo.fork == false
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        with:
+          sarif_file: trivy-results.sarif
+          # Distinct category per variant, or the two matrix legs overwrite each
+          # other's results in the Security tab.
+          category: trivy-${{ matrix.target }}
+
+      # Enforcement: fail only on CRITICALs that have a fix available, so a
+      # freshly-disclosed-but-unfixable CVE doesn't wedge every build. Anything
+      # accepted or not-applicable is documented in .trivyignore.
+      - name: Fail on fixable CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_INSECURE: "true"
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
 
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

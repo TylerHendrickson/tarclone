@@ -1,0 +1,7 @@
+# Trivy ignore file. Suppress specific vulnerability IDs that are assessed as
+# not applicable or knowingly accepted — one ID per line, each with a comment
+# explaining why. Keep this empty unless a finding needs a documented, deliberate
+# exception; a bare suppression with no rationale is worse than no suppression.
+#
+# Example:
+#   CVE-2024-00000  # not reachable: <reason>; revisit when a fix is released
