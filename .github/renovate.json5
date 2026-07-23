@@ -27,6 +27,16 @@
   ],
   packageRules: [
     {
+      // The example compose file self-references our own published image, pinned
+      // to :latest on purpose (users are told to pin it themselves). It's not a
+      // dependency to track, and Renovate's digest lookup of the not-yet-public
+      // GHCR package 401s — surfacing as a "No docker auth found" repo warning.
+      // Leave it alone.
+      description: 'Ignore self-reference to our own GHCR image',
+      matchDepNames: ['ghcr.io/tylerhendrickson/tarclone'],
+      enabled: false,
+    },
+    {
       description: 'Automerge GitHub Actions digest/minor/patch updates',
       matchManagers: ['github-actions'],
       matchUpdateTypes: ['digest', 'minor', 'patch'],
