@@ -1,0 +1,453 @@
+#!/usr/bin/env bash
+#
+# ----------------------------------------------------------------------------------
+# tarclone.sh — dated, rotating tar.gz snapshots of a directory to an rclone remote.
+# ----------------------------------------------------------------------------------
+
+set -euo pipefail
+umask 077
+
+usage() {
+  cat <<'EOF'
+Usage: tarclone.sh [OPTION]
+
+Create a dated, rotating tar.gz snapshot of a directory and upload it to an
+rclone remote. Configuration is read entirely from the environment; see the
+bundled example/tarclone.env for the variables and their defaults.
+
+Options:
+  -h, --help      Show this help and exit.
+      --check     Verify the required external commands are present, then exit
+                  without running a backup.
+      --show-config
+                  Print the effective configuration (one VAR=value per line)
+                  and exit. A ping URL supplied via its *_FILE variable is shown
+                  as that path, not resolved, so the output is safe to capture
+                  into a tarclone.env.
+
+Exit status is 0 only after a verified, published upload; non-zero on any
+error, including lock contention.
+EOF
+}
+
+# =============================================================================
+# Logging (defined first so even config-time errors are leveled + one-line)
+# =============================================================================
+# How we log:
+# - One event per call: embedded CR/LF are escaped so a single log line can't be
+#   split across physical lines (or forge a prefixed line) by untrusted content
+#   such as a filename.
+# - Severity is expressed by standard INFO/WARN/ERROR levels.
+# - Everything goes to stderr (for now, stdout is reserved for functional output).
+# - All log output is structured as "<TIMESTAMP> <LEVEL> <message...>".
+#   Use the log_info/log_warn/log_error/die helper functions to stay consistent.
+_log() {
+  local level="$1" msg="${*:2}"
+  msg="${msg//$'\r'/\\r}"
+  msg="${msg//$'\n'/\\n}"
+  printf '%s %-5s %s\n' "$(date '+%FT%T%:z')" "$level" "$msg" >&2
+}
+log_info()  { _log INFO  "$*"; }
+log_warn()  { _log WARN  "$*"; }
+log_error() { _log ERROR "$*"; }
+die()       { log_error "$*"; exit 1; }
+
+# =============================================================================
+# Dependency check + command-line options
+# =============================================================================
+# Verify the external commands a run relies on. Called both at the start of a
+# run and standalone via --check. An HTTP client is only required when a
+# heartbeat ping is configured, so it is checked conditionally. This reads env
+# directly (not the resolved config below) so --check works on a bare host.
+check_dependencies() {
+  local -a required=(rclone tar find flock sha256sum stat date)
+  # Compressor: gzip unless an alternate is configured.
+  if [[ -n "${TARCLONE_COMPRESS_PROG:-}" ]]; then required+=("$TARCLONE_COMPRESS_PROG"); else required+=(gzip); fi
+  local -a missing=()
+  local cmd
+  for cmd in "${required[@]}"; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  local ping_config="${TARCLONE_PING_URL:-}${TARCLONE_PING_URL_START:-}${TARCLONE_PING_URL_FAILURE:-}${TARCLONE_PING_URL_FILE:-}${TARCLONE_PING_URL_START_FILE:-}${TARCLONE_PING_URL_FAILURE_FILE:-}"
+  if [[ -n "$ping_config" ]] \
+     && ! command -v curl >/dev/null 2>&1 \
+     && ! command -v wget >/dev/null 2>&1; then
+    missing+=("curl or wget (for the configured heartbeat ping)")
+  fi
+  if (( ${#missing[@]} > 0 )); then
+    local m
+    for m in "${missing[@]}"; do log_error "missing required command: ${m}"; done
+    return 1
+  fi
+  log_info "All required commands are present"
+}
+
+# Print the configuration (see --show-config), one VAR=value per line so the
+# output can be captured straight into a tarclone.env. Reflects resolved
+# defaults but is called BEFORE *_FILE secret resolution, so a ping URL supplied
+# via *_FILE is reported as its *_FILE path, never its contents — resolving the
+# secret is the operator's job, not ours. Only the TARCLONE_* variables tarclone
+# reads are shown; rclone's own variables (RCLONE_CONFIG and the rest) are
+# rclone's to document.
+dump_config() {
+  local v fvar
+  echo "# tarclone effective configuration"
+  for v in TARCLONE_SOURCE TARCLONE_ARCHIVE_PREFIX TARCLONE_REMOTE TARCLONE_REMOTE_PATH \
+           TARCLONE_RETENTION_COUNT TARCLONE_VERIFY_CHECKSUM TARCLONE_COMPRESS_PROG TARCLONE_STAGING_DIR TARCLONE_LOCK_FILE \
+           TARCLONE_CONTIMEOUT TARCLONE_TIMEOUT TARCLONE_RETRIES TARCLONE_RCLONE_FLAGS \
+           TARCLONE_PRE_HOOK TARCLONE_POST_HOOK TARCLONE_PING_TIMEOUT; do
+    printf '%s=%s\n' "$v" "${!v-}"
+  done
+  # Ping URLs: show whichever form the operator set. A directly-set value is
+  # printed verbatim (their choice to put it in the environment); a *_FILE is
+  # shown as its path, unresolved.
+  for v in TARCLONE_PING_URL TARCLONE_PING_URL_START TARCLONE_PING_URL_FAILURE; do
+    fvar="${v}_FILE"
+    if [[ -n "${!v-}" ]]; then
+      printf '%s=%s\n' "$v" "${!v}"
+    elif [[ -n "${!fvar-}" ]]; then
+      printf '%s=%s\n' "$fvar" "${!fvar}"
+    else
+      printf '%s=\n' "$v"
+    fi
+  done
+  printf '# Derived (computed, not directly settable):\n'
+  printf '#   remote target : %s\n' "$REMOTE_DIR"
+  printf '#   archive name  : %s_<timestamp>.tar.gz\n' "$TARCLONE_ARCHIVE_PREFIX"
+}
+
+# Parse options before reading configuration, so --help and --check work with
+# no environment set up. Requested help is normal output (stdout, exit 0); an
+# unrecognized option is a usage error (message + usage on stderr, exit 2).
+DO_CHECK=0
+DO_DUMP=0
+while (( $# )); do
+  case "$1" in
+    -h|--help)     usage; exit 0 ;;
+    --check)       DO_CHECK=1; shift ;;
+    --show-config) DO_DUMP=1; shift ;;
+    --)            shift; break ;;
+    -*)            log_error "unknown option: $1"; usage >&2; exit 2 ;;
+    *)             log_error "unexpected argument: $1"; usage >&2; exit 2 ;;
+  esac
+done
+
+if (( DO_CHECK )); then
+  check_dependencies || exit 1
+  exit 0
+fi
+
+# =============================================================================
+# Configuration (all env-overridable)
+# =============================================================================
+# --- Source ---
+: "${TARCLONE_SOURCE:?set TARCLONE_SOURCE to the directory to back up}"
+# --- Destination (rclone) ---
+: "${TARCLONE_REMOTE:?set TARCLONE_REMOTE to a configured rclone remote name}"
+: "${TARCLONE_REMOTE_PATH:=}"                  # path within the remote (e.g. a share or bucket subpath)
+: "${TARCLONE_CONTIMEOUT:=30s}"
+: "${TARCLONE_TIMEOUT:=120s}"
+: "${TARCLONE_RETRIES:=2}"
+: "${TARCLONE_RCLONE_FLAGS:=}"
+# --- Naming ---
+: "${TARCLONE_ARCHIVE_PREFIX:=}"                # defaults to the source dir's own name (set below)
+# --- Retention ---
+: "${TARCLONE_RETENTION_COUNT:=10}"            # keep newest N; 0 = keep all
+# --- Behavior ---
+: "${TARCLONE_VERIFY_CHECKSUM:=true}"          # read the upload back and compare sha256
+: "${TARCLONE_COMPRESS_PROG:=}"                # empty => gzip (tar -z); or e.g. "pigz"
+: "${TARCLONE_STAGING_DIR:=${TMPDIR:-/tmp}}"   # holds only the archive (not a copy of the source)
+: "${TARCLONE_LOCK_FILE:=}"                    # defaults under STAGING/TMP (set below)
+# --- Optional pre/post hooks (generic; e.g. quiesce an app around the read) ---
+: "${TARCLONE_PRE_HOOK:=}"                     # shell run before the archive step
+: "${TARCLONE_POST_HOOK:=}"                    # shell run after it (always runs, even on failure)
+# --- Optional external heartbeat ping (dead-man's-switch) ---
+: "${TARCLONE_PING_URL:=}"                     # GET on success
+: "${TARCLONE_PING_URL_START:=}"               # GET when the run starts
+: "${TARCLONE_PING_URL_FAILURE:=}"             # GET on failure
+: "${TARCLONE_PING_TIMEOUT:=10}"
+
+# Resolve "<NAME>_FILE" indirection for secret-bearing values. A direct env var,
+# if non-empty, takes precedence over its _FILE counterpart.
+load_file_secret() {
+  local var="$1" fvar="${1}_FILE" path
+  # A non-empty direct value always wins; the _FILE is not consulted at all
+  # (so a stale/unreadable _FILE can't abort a run that isn't using it).
+  [[ -n "${!var:-}" ]] && return 0
+  path="${!fvar:-}"
+  [[ -n "$path" ]] || return 0
+  [[ -r "$path" ]] || die "${fvar}=${path} is not readable"
+  printf -v "$var" '%s' "$(< "$path")"
+}
+# Resolution is deferred until after the --show-config dispatch below, so the
+# dump reports a *_FILE secret as its path rather than resolving its contents.
+
+# =============================================================================
+# Derived values + state (do not edit)
+# =============================================================================
+TARCLONE_SOURCE="${TARCLONE_SOURCE%/}"
+SOURCE_PARENT="$(dirname -- "$TARCLONE_SOURCE")"
+SOURCE_NAME="$(basename -- "$TARCLONE_SOURCE")"   # == top-level dir inside the archive
+: "${TARCLONE_ARCHIVE_PREFIX:=$SOURCE_NAME}"
+: "${TARCLONE_LOCK_FILE:=${TARCLONE_STAGING_DIR%/}/backup-${TARCLONE_ARCHIVE_PREFIX}.lock}"
+
+TIMESTAMP="$(date +%Y-%m-%d_%H%M%S)"
+ARCHIVE_NAME="${TARCLONE_ARCHIVE_PREFIX}_${TIMESTAMP}.tar.gz"
+LOCAL_ARCHIVE="${TARCLONE_STAGING_DIR%/}/${ARCHIVE_NAME}"
+
+if [[ -n "$TARCLONE_REMOTE_PATH" ]]; then
+  REMOTE_DIR="${TARCLONE_REMOTE}:${TARCLONE_REMOTE_PATH%/}"
+else
+  REMOTE_DIR="${TARCLONE_REMOTE}:"
+fi
+REMOTE_PARTIAL="${REMOTE_DIR%/}/${ARCHIVE_NAME}.partial"
+REMOTE_FINAL="${REMOTE_DIR%/}/${ARCHIVE_NAME}"
+
+if [[ -n "$TARCLONE_COMPRESS_PROG" ]]; then
+  TAR_COMPRESS=(--use-compress-program "$TARCLONE_COMPRESS_PROG")
+else
+  TAR_COMPRESS=(-z)
+fi
+
+RCLONE_FLAGS=(--contimeout "$TARCLONE_CONTIMEOUT" --timeout "$TARCLONE_TIMEOUT" \
+              --retries "$TARCLONE_RETRIES" --low-level-retries 3)
+if [[ -n "$TARCLONE_RCLONE_FLAGS" ]]; then
+  read -r -a _extra <<<"$TARCLONE_RCLONE_FLAGS"
+  RCLONE_FLAGS+=("${_extra[@]}")
+fi
+
+POST_PENDING=0
+UPLOADED_PARTIAL=0
+RUN_OK=0
+
+# Dump the configuration and exit (--show-config). Deliberately runs BEFORE the
+# _FILE resolution below, so a secret supplied via *_FILE is reported as its
+# path, never resolved — the dump stays safe to capture into a tarclone.env.
+if (( DO_DUMP )); then
+  dump_config
+  exit 0
+fi
+
+# Resolve *_FILE secret indirection for the actual run (see load_file_secret).
+for _v in TARCLONE_PING_URL TARCLONE_PING_URL_START TARCLONE_PING_URL_FAILURE; do
+  load_file_secret "$_v"
+done
+
+# =============================================================================
+# Helpers
+# =============================================================================
+rc() { rclone "${RCLONE_FLAGS[@]}" "$@"; }
+
+run_hook() {
+  local name="$1" cmd="$2"
+  [[ -n "$cmd" ]] || return 0
+  log_info "Running ${name}-hook"
+  bash -c "$cmd"
+}
+
+# Best-effort HTTP GET; never alters the backup's outcome. The URL is not logged
+# (it may carry a secret token); only a labelled outcome is.
+http_get() {
+  local url="$1" label="$2"
+  [[ -n "$url" ]] || return 0
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS -m "$TARCLONE_PING_TIMEOUT" -o /dev/null "$url" || log_warn "${label} ping failed"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T "$TARCLONE_PING_TIMEOUT" -O /dev/null "$url" || log_warn "${label} ping failed"
+  else
+    log_warn "${label} ping configured but no curl/wget present; skipping"
+  fi
+  return 0
+}
+
+# Fail if anything tar must read is unreadable by this process. find's -readable/
+# -executable tests use access(2) — i.e. the real uid/gid + supplementary groups —
+# which matches tar's own reads whenever real and effective IDs agree (the normal
+# case). Flagged: regular files lacking read, directories lacking read OR traverse.
+preflight_readable() {
+  log_info "Pre-flight: verifying every path under ${TARCLONE_SOURCE} is readable"
+  local -a unreadable
+  local p
+  mapfile -d '' -t unreadable < <(
+    find "$TARCLONE_SOURCE" \
+      \( \( -type f ! -readable \) \
+         -o \( -type d \( ! -readable -o ! -executable \) \) \) \
+      -print0 2>/dev/null
+  )
+  if (( ${#unreadable[@]} > 0 )); then
+    log_info "There are ${#unreadable[@]} path(s) under ${TARCLONE_SOURCE} that the backup user cannot read (uid=$(id -u) gid=$(id -g) groups=$(id -G)):"
+    for p in "${unreadable[@]}"; do log_info "  unreadable: ${p}"; done
+    die "unreadable paths in the backup tree — refusing to create an incomplete archive"
+  fi
+  log_info "Pre-flight OK: everything under ${TARCLONE_SOURCE} is readable"
+}
+
+# Remove local staging archives left by prior runs that were killed before
+# finalize could delete them. Runs under the lock, before we write the new
+# archive, so it reclaims disk up front. Best-effort by design: a stale file we
+# can't remove (e.g. left behind by a prior run under a different uid) must not
+# wedge every future backup, so a failure warns rather than aborts — unlike the
+# remote housekeeping below, where a failure signals a real problem worth an alert.
+cleanup_orphaned_local() {
+  local f
+  for f in "${TARCLONE_STAGING_DIR%/}/${TARCLONE_ARCHIVE_PREFIX}"_*.tar.gz; do
+    [[ -e "$f" ]] || continue   # no matches: the glob stays literal, so skip it
+    log_info "Removing orphaned local staging archive: ${f}"
+    rm -f -- "$f" || log_warn "could not remove orphaned staging archive: ${f}"
+  done
+}
+
+# Remove ".partial" uploads left on the remote by prior runs that were killed
+# (SIGKILL/power loss) before they could publish or clean up. We hold the
+# single-instance lock and our own .partial has already been renamed away by the
+# publish step, so any .partial still present predates this run and is orphaned.
+# Nothing else reaps these — retention only counts *.tar.gz.
+cleanup_orphaned_partials() {
+  local listing
+  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.partial")" \
+    || die "cleanup: failed to list remote for orphaned .partial uploads"
+  [[ -n "$listing" ]] || return 0
+  local f
+  while IFS= read -r f; do
+    f="${f%/}"
+    [[ -n "$f" ]] || continue
+    log_info "Removing orphaned .partial from a prior run: ${f}"
+    rc deletefile "${REMOTE_DIR%/}/${f}" || die "cleanup: failed to remove orphaned ${f}"
+  done <<<"$listing"
+}
+
+prune_old() {
+  [[ "$TARCLONE_RETENTION_COUNT" -gt 0 ]] || { log_info "Retention disabled; keeping all archives"; return 0; }
+  # Files only; ".partial" uploads don't match *.tar.gz, so they're never counted.
+  local listing
+  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.tar.gz")" \
+    || die "retention: failed to list remote archives for pruning"
+  local -a archives=()
+  [[ -n "$listing" ]] && mapfile -t archives < <(LC_ALL=C sort <<<"$listing")
+  local count=${#archives[@]}
+  if (( count > TARCLONE_RETENTION_COUNT )); then
+    local remove=$(( count - TARCLONE_RETENTION_COUNT )) f
+    log_info "Pruning ${remove} old archive(s) (keeping newest ${TARCLONE_RETENTION_COUNT} of ${count})"
+    for f in "${archives[@]:0:remove}"; do
+      f="${f%/}"
+      log_info "  removing ${f}"
+      rc deletefile "${REMOTE_DIR%/}/${f}" || die "retention: failed to remove ${f}"
+    done
+  else
+    log_info "No pruning needed (${count} <= ${TARCLONE_RETENTION_COUNT})"
+  fi
+}
+
+finalize() {
+  local code=$?
+  [[ -n "${FINALIZED:-}" ]] && return
+  FINALIZED=1
+
+  # Make sure a post-hook (e.g. "restart the app we quiesced") runs even on failure.
+  if [[ "$POST_PENDING" -eq 1 ]]; then
+    run_hook "post" "$TARCLONE_POST_HOOK" || log_warn "post-hook failed during cleanup"
+    POST_PENDING=0
+  fi
+
+  if [[ "$UPLOADED_PARTIAL" -eq 1 ]]; then
+    rc deletefile "$REMOTE_PARTIAL" 2>/dev/null || log_warn "could not remove leftover .partial"
+  fi
+  rm -f -- "$LOCAL_ARCHIVE" 2>/dev/null || true
+
+  if [[ "$RUN_OK" -eq 1 ]]; then
+    log_info "Backup OK (${ARCHIVE_NAME})"
+    http_get "$TARCLONE_PING_URL" "success"
+    exit 0
+  fi
+  log_info "Backup FAILED (rc=${code})"
+  http_get "$TARCLONE_PING_URL_FAILURE" "failure"
+  exit $(( code == 0 ? 1 : code ))
+}
+trap finalize EXIT
+trap 'exit 143' TERM INT   # a per-run timeout (SIGTERM) routes through finalize for cleanup
+
+# =============================================================================
+# Main
+# =============================================================================
+main() {
+  log_info "=== backup starting: ${TARCLONE_SOURCE} -> ${REMOTE_FINAL} ==="
+  check_dependencies || die "missing required commands (see above)"
+  [[ -d "$TARCLONE_SOURCE" ]] || die "source is not a directory: ${TARCLONE_SOURCE}"
+
+  # Create the staging dir before taking the lock: the default TARCLONE_LOCK_FILE lives
+  # inside it, so opening the lock fd would otherwise fail on a not-yet-created
+  # TARCLONE_STAGING_DIR.
+  mkdir -p -- "$TARCLONE_STAGING_DIR"
+
+  # Single-instance lock. Contention == ERROR by design: at a daily cadence a
+  # still-running prior instance means the previous run is stuck, which should
+  # alert (non-zero exit), not be silently skipped.
+  exec 9>"$TARCLONE_LOCK_FILE"
+  flock -n 9 || die "another run holds ${TARCLONE_LOCK_FILE} — previous backup appears stuck"
+
+  # Reclaim disk from any prior killed run before we stage a new (full-size) archive.
+  cleanup_orphaned_local
+
+  http_get "$TARCLONE_PING_URL_START" "start"
+
+  # Optional quiesce; the matching release is guaranteed by POST_PENDING/finalize.
+  if [[ -n "$TARCLONE_PRE_HOOK" ]]; then run_hook "pre" "$TARCLONE_PRE_HOOK"; POST_PENDING=1; fi
+
+  # Validate that everything in the backup source tree is readable, or fail
+  preflight_readable
+
+  # Archive the source directly. --numeric-owner records uid/gid from stat (no
+  # chown needed), so ownership restores faithfully on a fresh host.
+  log_info "Archiving ${SOURCE_NAME} -> ${ARCHIVE_NAME}"
+  set +e
+  tar --numeric-owner -p --acls --xattrs "${TAR_COMPRESS[@]}" \
+      -cf "$LOCAL_ARCHIVE" -C "$SOURCE_PARENT" "$SOURCE_NAME"
+  local trc=$?
+  set -e
+  # tar rc=1 = "a file changed as we read it" (live data); archive still usable.
+  # rc>=2 is a real error.
+  if [[ "$trc" -ge 2 ]]; then die "tar failed (rc=${trc})"; fi
+  [[ "$trc" -eq 1 ]] && log_info "tar rc=1 (a file changed while reading) — tolerated; archive is usable"
+
+  # Release the quiesce as soon as the read is done.
+  if [[ "$POST_PENDING" -eq 1 ]]; then run_hook "post" "$TARCLONE_POST_HOOK"; POST_PENDING=0; fi
+
+  log_info "Validating archive"
+  if [[ -n "$TARCLONE_COMPRESS_PROG" ]]; then
+    "$TARCLONE_COMPRESS_PROG" -t "$LOCAL_ARCHIVE" || die "compression integrity check failed"
+  else
+    gzip -t "$LOCAL_ARCHIVE" || die "gzip integrity check failed"
+  fi
+  tar -tf "$LOCAL_ARCHIVE" >/dev/null || die "archive listing failed (corrupt)"
+  log_info "Archive OK ($(stat -c %s "$LOCAL_ARCHIVE") bytes)"
+
+  # Upload as .partial first; rclone copyto verifies size on completion.
+  log_info "Uploading ${ARCHIVE_NAME}.partial"
+  rc copyto "$LOCAL_ARCHIVE" "$REMOTE_PARTIAL"
+  UPLOADED_PARTIAL=1
+
+  if [[ "$TARCLONE_VERIFY_CHECKSUM" == "true" ]]; then
+    log_info "Verifying sha256 (reads the file back from the remote)"
+    local lsum rsum
+    read -r lsum _ < <(sha256sum "$LOCAL_ARCHIVE")
+    rsum="$(rc cat "$REMOTE_PARTIAL" | sha256sum)"; rsum="${rsum%% *}"
+    [[ "$lsum" == "$rsum" ]] || die "checksum mismatch after upload"
+    log_info "Checksum verified"
+  fi
+
+  # Publish atomically: server-side rename where the backend supports it.
+  log_info "Publishing (atomic rename)"
+  rc moveto "$REMOTE_PARTIAL" "$REMOTE_FINAL"
+  UPLOADED_PARTIAL=0
+  local published
+  published="$(rc lsf "$REMOTE_DIR" --include "$ARCHIVE_NAME")" \
+    || die "could not list remote to confirm publish"
+  [[ -n "$published" ]] || die "final archive missing after publish"
+  log_info "Published ${ARCHIVE_NAME}"
+
+  cleanup_orphaned_partials
+  prune_old
+  RUN_OK=1   # finalize() now removes the local copy and sends the success ping
+}
+
+main
