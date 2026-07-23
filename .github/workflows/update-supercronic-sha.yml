@@ -1,0 +1,119 @@
+name: Update supercronic SHA
+
+# Renovate bumps SUPERCRONIC_VERSION in the Dockerfile but cannot refresh the
+# per-arch SHA1 pins (no datasource yields release-asset checksums). This
+# workflow recomputes them on the Renovate PR and offers them as a committable
+# review suggestion — accepting it creates a user commit that re-triggers CI, so
+# the Dockerfile's `sha1sum -c` step validates the new pins. No PAT required.
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+
+permissions:
+  contents: read
+
+jobs:
+  suggest-sha:
+    if: github.actor == 'renovate[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo-and-containers: true
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: sha
+        name: Recompute per-arch SHA1s
+        run: |
+          set -euo pipefail
+          ver=$(grep -oP '(?<=^ARG SUPERCRONIC_VERSION=)\S+' Dockerfile)
+          cur_amd=$(grep -oP '(?<=^ARG SUPERCRONIC_SHA1_AMD64=)\S+' Dockerfile)
+          cur_arm=$(grep -oP '(?<=^ARG SUPERCRONIC_SHA1_ARM64=)\S+' Dockerfile)
+          line_amd=$(grep -n '^ARG SUPERCRONIC_SHA1_AMD64=' Dockerfile | cut -d: -f1)
+          line_arm=$(grep -n '^ARG SUPERCRONIC_SHA1_ARM64=' Dockerfile | cut -d: -f1)
+
+          # The suggestion replaces the inclusive line range AMD64..ARM64, so it
+          # is only correct if those ARGs are adjacent and in that order. Bail
+          # loudly rather than post a suggestion spanning unintended lines.
+          if [ "$line_arm" -ne "$((line_amd + 1))" ]; then
+            echo "SUPERCRONIC_SHA1 ARGs must be adjacent (AMD64 then ARM64); got lines ${line_amd} and ${line_arm}" >&2
+            exit 1
+          fi
+
+          tmp=$(mktemp -d)
+          for arch in amd64 arm64; do
+            curl -fsSL --retry 3 -o "$tmp/$arch" \
+              "https://github.com/aptible/supercronic/releases/download/${ver}/supercronic-linux-${arch}"
+          done
+          new_amd=$(sha1sum "$tmp/amd64" | cut -d' ' -f1)
+          new_arm=$(sha1sum "$tmp/arm64" | cut -d' ' -f1)
+
+          {
+            echo "line_amd=$line_amd"
+            echo "line_arm=$line_arm"
+            echo "new_amd=$new_amd"
+            echo "new_arm=$new_arm"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$new_amd" = "$cur_amd" ] && [ "$new_arm" = "$cur_arm" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "SHA1 pins already match ${ver}; nothing to suggest."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "SHA1 pins are stale for ${ver}; will suggest an update."
+          fi
+
+      - name: Post / clear suggestion
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          CHANGED: ${{ steps.sha.outputs.changed }}
+          LINE_AMD: ${{ steps.sha.outputs.line_amd }}
+          LINE_ARM: ${{ steps.sha.outputs.line_arm }}
+          NEW_AMD: ${{ steps.sha.outputs.new_amd }}
+          NEW_ARM: ${{ steps.sha.outputs.new_arm }}
+        with:
+          script: |
+            const marker = '<!-- supercronic-sha -->';
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+
+            // Drop any prior suggestion from us — stale or already resolved.
+            const existing = await github.paginate(github.rest.pulls.listReviewComments, {
+              owner, repo, pull_number,
+            });
+            for (const c of existing) {
+              if (c.user.type === 'Bot' && c.body.includes(marker)) {
+                await github.rest.pulls.deleteReviewComment({ owner, repo, comment_id: c.id });
+              }
+            }
+
+            if (process.env.CHANGED !== 'true') return;
+
+            const suggestion = [
+              `ARG SUPERCRONIC_SHA1_AMD64=${process.env.NEW_AMD}`,
+              `ARG SUPERCRONIC_SHA1_ARM64=${process.env.NEW_ARM}`,
+            ].join('\n');
+            const body = [
+              marker,
+              'Recomputed supercronic SHA1 pins for the bumped version. Accept to commit — CI will re-verify via `sha1sum -c`.',
+              '',
+              '```suggestion',
+              suggestion,
+              '```',
+            ].join('\n');
+
+            await github.rest.pulls.createReviewComment({
+              owner, repo, pull_number,
+              commit_id: context.payload.pull_request.head.sha,
+              path: 'Dockerfile',
+              start_line: Number(process.env.LINE_AMD),
+              line: Number(process.env.LINE_ARM),
+              start_side: 'RIGHT',
+              side: 'RIGHT',
+              body,
+            });
