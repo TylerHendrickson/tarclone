@@ -47,10 +47,13 @@ _log() {
   msg="${msg//$'\n'/\\n}"
   printf '%s %-5s %s\n' "$(date '+%FT%T%:z')" "$level" "$msg" >&2
 }
-log_info()  { _log INFO  "$*"; }
-log_warn()  { _log WARN  "$*"; }
+log_info() { _log INFO "$*"; }
+log_warn() { _log WARN "$*"; }
 log_error() { _log ERROR "$*"; }
-die()       { log_error "$*"; exit 1; }
+die() {
+  log_error "$*"
+  exit 1
+}
 
 # =============================================================================
 # Dependency check + command-line options
@@ -69,12 +72,12 @@ check_dependencies() {
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   local ping_config="${TARCLONE_PING_URL:-}${TARCLONE_PING_URL_START:-}${TARCLONE_PING_URL_FAILURE:-}${TARCLONE_PING_URL_FILE:-}${TARCLONE_PING_URL_START_FILE:-}${TARCLONE_PING_URL_FAILURE_FILE:-}"
-  if [[ -n "$ping_config" ]] \
-     && ! command -v curl >/dev/null 2>&1 \
-     && ! command -v wget >/dev/null 2>&1; then
+  if [[ -n "$ping_config" ]] &&
+    ! command -v curl >/dev/null 2>&1 &&
+    ! command -v wget >/dev/null 2>&1; then
     missing+=("curl or wget (for the configured heartbeat ping)")
   fi
-  if (( ${#missing[@]} > 0 )); then
+  if ((${#missing[@]} > 0)); then
     local m
     for m in "${missing[@]}"; do log_error "missing required command: ${m}"; done
     return 1
@@ -93,9 +96,9 @@ dump_config() {
   local v fvar
   echo "# tarclone effective configuration"
   for v in TARCLONE_SOURCE TARCLONE_ARCHIVE_PREFIX TARCLONE_REMOTE TARCLONE_REMOTE_PATH \
-           TARCLONE_RETENTION_COUNT TARCLONE_VERIFY_CHECKSUM TARCLONE_COMPRESS_PROG TARCLONE_STAGING_DIR TARCLONE_LOCK_FILE \
-           TARCLONE_CONTIMEOUT TARCLONE_TIMEOUT TARCLONE_RETRIES TARCLONE_RCLONE_FLAGS \
-           TARCLONE_PRE_HOOK TARCLONE_POST_HOOK TARCLONE_PING_TIMEOUT; do
+    TARCLONE_RETENTION_COUNT TARCLONE_VERIFY_CHECKSUM TARCLONE_COMPRESS_PROG TARCLONE_STAGING_DIR TARCLONE_LOCK_FILE \
+    TARCLONE_CONTIMEOUT TARCLONE_TIMEOUT TARCLONE_RETRIES TARCLONE_RCLONE_FLAGS \
+    TARCLONE_PRE_HOOK TARCLONE_POST_HOOK TARCLONE_PING_TIMEOUT; do
     printf '%s=%s\n' "$v" "${!v-}"
   done
   # Ping URLs: show whichever form the operator set. A directly-set value is
@@ -121,18 +124,38 @@ dump_config() {
 # unrecognized option is a usage error (message + usage on stderr, exit 2).
 DO_CHECK=0
 DO_DUMP=0
-while (( $# )); do
+while (($#)); do
   case "$1" in
-    -h|--help)     usage; exit 0 ;;
-    --check)       DO_CHECK=1; shift ;;
-    --show-config) DO_DUMP=1; shift ;;
-    --)            shift; break ;;
-    -*)            log_error "unknown option: $1"; usage >&2; exit 2 ;;
-    *)             log_error "unexpected argument: $1"; usage >&2; exit 2 ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  --check)
+    DO_CHECK=1
+    shift
+    ;;
+  --show-config)
+    DO_DUMP=1
+    shift
+    ;;
+  --)
+    shift
+    break
+    ;;
+  -*)
+    log_error "unknown option: $1"
+    usage >&2
+    exit 2
+    ;;
+  *)
+    log_error "unexpected argument: $1"
+    usage >&2
+    exit 2
+    ;;
   esac
 done
 
-if (( DO_CHECK )); then
+if ((DO_CHECK)); then
   check_dependencies || exit 1
   exit 0
 fi
@@ -144,27 +167,27 @@ fi
 : "${TARCLONE_SOURCE:?set TARCLONE_SOURCE to the directory to back up}"
 # --- Destination (rclone) ---
 : "${TARCLONE_REMOTE:?set TARCLONE_REMOTE to a configured rclone remote name}"
-: "${TARCLONE_REMOTE_PATH:=}"                  # path within the remote (e.g. a share or bucket subpath)
+: "${TARCLONE_REMOTE_PATH:=}" # path within the remote (e.g. a share or bucket subpath)
 : "${TARCLONE_CONTIMEOUT:=30s}"
 : "${TARCLONE_TIMEOUT:=120s}"
 : "${TARCLONE_RETRIES:=2}"
 : "${TARCLONE_RCLONE_FLAGS:=}"
 # --- Naming ---
-: "${TARCLONE_ARCHIVE_PREFIX:=}"                # defaults to the source dir's own name (set below)
+: "${TARCLONE_ARCHIVE_PREFIX:=}" # defaults to the source dir's own name (set below)
 # --- Retention ---
-: "${TARCLONE_RETENTION_COUNT:=10}"            # keep newest N; 0 = keep all
+: "${TARCLONE_RETENTION_COUNT:=10}" # keep newest N; 0 = keep all
 # --- Behavior ---
-: "${TARCLONE_VERIFY_CHECKSUM:=true}"          # read the upload back and compare sha256
-: "${TARCLONE_COMPRESS_PROG:=}"                # empty => gzip (tar -z); or e.g. "pigz"
-: "${TARCLONE_STAGING_DIR:=${TMPDIR:-/tmp}}"   # holds only the archive (not a copy of the source)
-: "${TARCLONE_LOCK_FILE:=}"                    # defaults under STAGING/TMP (set below)
+: "${TARCLONE_VERIFY_CHECKSUM:=true}"        # read the upload back and compare sha256
+: "${TARCLONE_COMPRESS_PROG:=}"              # empty => gzip (tar -z); or e.g. "pigz"
+: "${TARCLONE_STAGING_DIR:=${TMPDIR:-/tmp}}" # holds only the archive (not a copy of the source)
+: "${TARCLONE_LOCK_FILE:=}"                  # defaults under STAGING/TMP (set below)
 # --- Optional pre/post hooks (generic; e.g. quiesce an app around the read) ---
-: "${TARCLONE_PRE_HOOK:=}"                     # shell run before the archive step
-: "${TARCLONE_POST_HOOK:=}"                    # shell run after it (always runs, even on failure)
+: "${TARCLONE_PRE_HOOK:=}"  # shell run before the archive step
+: "${TARCLONE_POST_HOOK:=}" # shell run after it (always runs, even on failure)
 # --- Optional external heartbeat ping (dead-man's-switch) ---
-: "${TARCLONE_PING_URL:=}"                     # GET on success
-: "${TARCLONE_PING_URL_START:=}"               # GET when the run starts
-: "${TARCLONE_PING_URL_FAILURE:=}"             # GET on failure
+: "${TARCLONE_PING_URL:=}"         # GET on success
+: "${TARCLONE_PING_URL_START:=}"   # GET when the run starts
+: "${TARCLONE_PING_URL_FAILURE:=}" # GET on failure
 : "${TARCLONE_PING_TIMEOUT:=10}"
 
 # Resolve "<NAME>_FILE" indirection for secret-bearing values. A direct env var,
@@ -177,7 +200,7 @@ load_file_secret() {
   path="${!fvar:-}"
   [[ -n "$path" ]] || return 0
   [[ -r "$path" ]] || die "${fvar}=${path} is not readable"
-  printf -v "$var" '%s' "$(< "$path")"
+  printf -v "$var" '%s' "$(<"$path")"
 }
 # Resolution is deferred until after the --show-config dispatch below, so the
 # dump reports a *_FILE secret as its path rather than resolving its contents.
@@ -187,7 +210,7 @@ load_file_secret() {
 # =============================================================================
 TARCLONE_SOURCE="${TARCLONE_SOURCE%/}"
 SOURCE_PARENT="$(dirname -- "$TARCLONE_SOURCE")"
-SOURCE_NAME="$(basename -- "$TARCLONE_SOURCE")"   # == top-level dir inside the archive
+SOURCE_NAME="$(basename -- "$TARCLONE_SOURCE")" # == top-level dir inside the archive
 : "${TARCLONE_ARCHIVE_PREFIX:=$SOURCE_NAME}"
 : "${TARCLONE_LOCK_FILE:=${TARCLONE_STAGING_DIR%/}/backup-${TARCLONE_ARCHIVE_PREFIX}.lock}"
 
@@ -209,8 +232,8 @@ else
   TAR_COMPRESS=(-z)
 fi
 
-RCLONE_FLAGS=(--contimeout "$TARCLONE_CONTIMEOUT" --timeout "$TARCLONE_TIMEOUT" \
-              --retries "$TARCLONE_RETRIES" --low-level-retries 3)
+RCLONE_FLAGS=(--contimeout "$TARCLONE_CONTIMEOUT" --timeout "$TARCLONE_TIMEOUT"
+  --retries "$TARCLONE_RETRIES" --low-level-retries 3)
 if [[ -n "$TARCLONE_RCLONE_FLAGS" ]]; then
   read -r -a _extra <<<"$TARCLONE_RCLONE_FLAGS"
   RCLONE_FLAGS+=("${_extra[@]}")
@@ -223,7 +246,7 @@ RUN_OK=0
 # Dump the configuration and exit (--show-config). Deliberately runs BEFORE the
 # _FILE resolution below, so a secret supplied via *_FILE is reported as its
 # path, never resolved — the dump stays safe to capture into a tarclone.env.
-if (( DO_DUMP )); then
+if ((DO_DUMP)); then
   dump_config
   exit 0
 fi
@@ -271,10 +294,10 @@ preflight_readable() {
   mapfile -d '' -t unreadable < <(
     find "$TARCLONE_SOURCE" \
       \( \( -type f ! -readable \) \
-         -o \( -type d \( ! -readable -o ! -executable \) \) \) \
+      -o \( -type d \( ! -readable -o ! -executable \) \) \) \
       -print0 2>/dev/null
   )
-  if (( ${#unreadable[@]} > 0 )); then
+  if ((${#unreadable[@]} > 0)); then
     log_info "There are ${#unreadable[@]} path(s) under ${TARCLONE_SOURCE} that the backup user cannot read (uid=$(id -u) gid=$(id -g) groups=$(id -G)):"
     for p in "${unreadable[@]}"; do log_info "  unreadable: ${p}"; done
     die "unreadable paths in the backup tree — refusing to create an incomplete archive"
@@ -291,7 +314,7 @@ preflight_readable() {
 cleanup_orphaned_local() {
   local f
   for f in "${TARCLONE_STAGING_DIR%/}/${TARCLONE_ARCHIVE_PREFIX}"_*.tar.gz; do
-    [[ -e "$f" ]] || continue   # no matches: the glob stays literal, so skip it
+    [[ -e "$f" ]] || continue # no matches: the glob stays literal, so skip it
     log_info "Removing orphaned local staging archive: ${f}"
     rm -f -- "$f" || log_warn "could not remove orphaned staging archive: ${f}"
   done
@@ -304,8 +327,8 @@ cleanup_orphaned_local() {
 # Nothing else reaps these — retention only counts *.tar.gz.
 cleanup_orphaned_partials() {
   local listing
-  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.partial")" \
-    || die "cleanup: failed to list remote for orphaned .partial uploads"
+  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.partial")" ||
+    die "cleanup: failed to list remote for orphaned .partial uploads"
   [[ -n "$listing" ]] || return 0
   local f
   while IFS= read -r f; do
@@ -317,16 +340,19 @@ cleanup_orphaned_partials() {
 }
 
 prune_old() {
-  [[ "$TARCLONE_RETENTION_COUNT" -gt 0 ]] || { log_info "Retention disabled; keeping all archives"; return 0; }
+  [[ "$TARCLONE_RETENTION_COUNT" -gt 0 ]] || {
+    log_info "Retention disabled; keeping all archives"
+    return 0
+  }
   # Files only; ".partial" uploads don't match *.tar.gz, so they're never counted.
   local listing
-  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.tar.gz")" \
-    || die "retention: failed to list remote archives for pruning"
+  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.tar.gz")" ||
+    die "retention: failed to list remote archives for pruning"
   local -a archives=()
   [[ -n "$listing" ]] && mapfile -t archives < <(LC_ALL=C sort <<<"$listing")
   local count=${#archives[@]}
-  if (( count > TARCLONE_RETENTION_COUNT )); then
-    local remove=$(( count - TARCLONE_RETENTION_COUNT )) f
+  if ((count > TARCLONE_RETENTION_COUNT)); then
+    local remove=$((count - TARCLONE_RETENTION_COUNT)) f
     log_info "Pruning ${remove} old archive(s) (keeping newest ${TARCLONE_RETENTION_COUNT} of ${count})"
     for f in "${archives[@]:0:remove}"; do
       f="${f%/}"
@@ -361,10 +387,10 @@ finalize() {
   fi
   log_info "Backup FAILED (rc=${code})"
   http_get "$TARCLONE_PING_URL_FAILURE" "failure"
-  exit $(( code == 0 ? 1 : code ))
+  exit $((code == 0 ? 1 : code))
 }
 trap finalize EXIT
-trap 'exit 143' TERM INT   # a per-run timeout (SIGTERM) routes through finalize for cleanup
+trap 'exit 143' TERM INT # a per-run timeout (SIGTERM) routes through finalize for cleanup
 
 # =============================================================================
 # Main
@@ -391,7 +417,10 @@ main() {
   http_get "$TARCLONE_PING_URL_START" "start"
 
   # Optional quiesce; the matching release is guaranteed by POST_PENDING/finalize.
-  if [[ -n "$TARCLONE_PRE_HOOK" ]]; then run_hook "pre" "$TARCLONE_PRE_HOOK"; POST_PENDING=1; fi
+  if [[ -n "$TARCLONE_PRE_HOOK" ]]; then
+    run_hook "pre" "$TARCLONE_PRE_HOOK"
+    POST_PENDING=1
+  fi
 
   # Validate that everything in the backup source tree is readable, or fail
   preflight_readable
@@ -401,7 +430,7 @@ main() {
   log_info "Archiving ${SOURCE_NAME} -> ${ARCHIVE_NAME}"
   set +e
   tar --numeric-owner -p --acls --xattrs "${TAR_COMPRESS[@]}" \
-      -cf "$LOCAL_ARCHIVE" -C "$SOURCE_PARENT" "$SOURCE_NAME"
+    -cf "$LOCAL_ARCHIVE" -C "$SOURCE_PARENT" "$SOURCE_NAME"
   local trc=$?
   set -e
   # tar rc=1 = "a file changed as we read it" (live data); archive still usable.
@@ -410,7 +439,10 @@ main() {
   [[ "$trc" -eq 1 ]] && log_info "tar rc=1 (a file changed while reading) — tolerated; archive is usable"
 
   # Release the quiesce as soon as the read is done.
-  if [[ "$POST_PENDING" -eq 1 ]]; then run_hook "post" "$TARCLONE_POST_HOOK"; POST_PENDING=0; fi
+  if [[ "$POST_PENDING" -eq 1 ]]; then
+    run_hook "post" "$TARCLONE_POST_HOOK"
+    POST_PENDING=0
+  fi
 
   log_info "Validating archive"
   if [[ -n "$TARCLONE_COMPRESS_PROG" ]]; then
@@ -430,7 +462,8 @@ main() {
     log_info "Verifying sha256 (reads the file back from the remote)"
     local lsum rsum
     read -r lsum _ < <(sha256sum "$LOCAL_ARCHIVE")
-    rsum="$(rc cat "$REMOTE_PARTIAL" | sha256sum)"; rsum="${rsum%% *}"
+    rsum="$(rc cat "$REMOTE_PARTIAL" | sha256sum)"
+    rsum="${rsum%% *}"
     [[ "$lsum" == "$rsum" ]] || die "checksum mismatch after upload"
     log_info "Checksum verified"
   fi
@@ -440,14 +473,14 @@ main() {
   rc moveto "$REMOTE_PARTIAL" "$REMOTE_FINAL"
   UPLOADED_PARTIAL=0
   local published
-  published="$(rc lsf "$REMOTE_DIR" --include "$ARCHIVE_NAME")" \
-    || die "could not list remote to confirm publish"
+  published="$(rc lsf "$REMOTE_DIR" --include "$ARCHIVE_NAME")" ||
+    die "could not list remote to confirm publish"
   [[ -n "$published" ]] || die "final archive missing after publish"
   log_info "Published ${ARCHIVE_NAME}"
 
   cleanup_orphaned_partials
   prune_old
-  RUN_OK=1   # finalize() now removes the local copy and sends the success ping
+  RUN_OK=1 # finalize() now removes the local copy and sends the success ping
 }
 
 main
