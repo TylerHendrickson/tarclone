@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo-and-containers: true
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: ShellCheck
+        uses: reviewdog/action-shellcheck@4c07458293ac342d477251099501a718ae5ef86e # v1.32.0
+        with:
+          reporter: local
+          fail_level: any
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo-and-containers: true
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install rclone
+        uses: AnimMouse/setup-rclone@26ef2133e09fd383329a1d4c1fbe6a71db1976c9 # v1.12.0
+      - name: Smoke test (host)
+        run: ./test/smoke.sh
+
+  build:
+    # Build both variants for both arches, push them to a throwaway job-local
+    # registry, and smoke-test the EXACT multi-arch image (host arch) that will
+    # be published — not a separate load-only build. On a push to main the tested
+    # manifest is then copied to GHCR under the immutable sha-<gitsha> tag that
+    # release.yml promotes, digest preserved, so the released image is the one CI
+    # tested. Pull requests run the same build+test but stop before GHCR (the
+    # local registry needs no credentials, so fork PRs test the real image too).
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    strategy:
+      matrix:
+        include:
+          - target: base
+            suffix: ""
+          - target: http-client
+            suffix: -http-client
+    env:
+      # Throwaway ref in the job-local registry: the build is pushed here and
+      # tested, then copied to GHCR under the real tags.
+      LOCAL_IMAGE: localhost:5000/tarclone:${{ matrix.target }}
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo: true
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          # buildkit runs in its own container; share the host network so it can
+          # reach the registry service published on localhost:5000.
+          driver-opts: network=host
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+            suffix=${{ matrix.suffix }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=edge,enable={{is_default_branch}}
+
+      - name: Build and push to local registry (multi-arch)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.LOCAL_IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Emit a plain multi-arch index (no attestation manifests) so the
+          # imagetools copy below reproduces exactly what was tested.
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+      - name: Image smoke — CLI flags & variant
+        run: |
+          docker run --rm --entrypoint /usr/local/bin/tarclone.sh "$LOCAL_IMAGE" --help >/dev/null
+          # curl is only in the http-client variant; base must report it missing
+          # when a ping URL is configured.
+          if [ "${{ matrix.target }}" = "http-client" ]; then
+            docker run --rm -e TARCLONE_PING_URL=https://example.test/ping \
+              --entrypoint /usr/local/bin/tarclone.sh "$LOCAL_IMAGE" --check
+          else
+            ! docker run --rm -e TARCLONE_PING_URL=https://example.test/ping \
+              --entrypoint /usr/local/bin/tarclone.sh "$LOCAL_IMAGE" --check
+          fi
+
+      - name: Image smoke — backup round-trip
+        run: TARCLONE_IMAGE="$LOCAL_IMAGE" ./test/smoke.sh
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish tested image to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SRC: ${{ env.LOCAL_IMAGE }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          # Copy the exact tested manifest from the local registry to GHCR under
+          # the sha/edge tags. imagetools preserves the digest, so what
+          # release.yml later promotes is byte-for-byte what CI tested.
+          args=()
+          while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
+          docker buildx imagetools create "${args[@]}" "$SRC"

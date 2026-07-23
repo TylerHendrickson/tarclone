@@ -22,3 +22,6 @@
 
 # Example files
 !/example/*
+
+# CI/CD workflows
+!.github/workflows/*.yml
