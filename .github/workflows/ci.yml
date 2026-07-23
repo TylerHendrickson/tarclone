@@ -183,9 +183,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          # Scan the published GHCR image by digest (HTTPS, authenticated by the
-          # login step) rather than the plaintext local registry.
-          image: ${{ steps.digest.outputs.name }}@${{ steps.digest.outputs.digest }}
+          image: ${{ env.LOCAL_IMAGE }}
           format: spdx-json
           output-file: sbom.spdx.json
           upload-artifact: false
