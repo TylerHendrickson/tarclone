@@ -1,5 +1,10 @@
 # tarclone
 
+[![CI](https://github.com/TylerHendrickson/tarclone/actions/workflows/ci.yml/badge.svg)](https://github.com/TylerHendrickson/tarclone/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/TylerHendrickson/tarclone?sort=semver)](https://github.com/TylerHendrickson/tarclone/releases)
+[![GHCR](https://img.shields.io/badge/image-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/TylerHendrickson/tarclone/pkgs/container/tarclone)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 A small, single-purpose script that archives a source directory to a dated, rotating `tar.gz` on any rclone remote.
 Runs natively on GNU Linux; Docker images provided for portability, with out-of-the-box scheduling and Prometheus metrics.
 
