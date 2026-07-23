@@ -65,13 +65,14 @@ jobs:
       - name: Promote sha-<gitsha> to release tags
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
-          ANNOTATIONS: ${{ steps.meta.outputs.annotations }}
           SUFFIX: ${{ matrix.suffix }}
         run: |
-          # env.IMAGE embeds the owner verbatim (mixed-case), but GHCR refs must be
-          # lowercase — normalize before constructing the source ref.
+          # Verbatim re-tag of the exact image CI built, tested, and attested: no
+          # --annotation, so the digest is preserved and the release tags share the
+          # tested digest and its attestations. The semver lives in the tag name;
+          # the index's version annotation stays sha-<gitsha> (its true provenance).
+          # env.IMAGE embeds the owner verbatim (mixed-case); GHCR refs need lowercase.
           src="${IMAGE,,}:sha-${GITHUB_SHA}${SUFFIX}"
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
-          while IFS= read -r a; do [ -n "$a" ] && args+=(--annotation "$a"); done <<< "$ANNOTATIONS"
           docker buildx imagetools create "${args[@]}" "$src"
