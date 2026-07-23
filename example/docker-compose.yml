@@ -1,0 +1,45 @@
+services:
+  backup:
+    image: ghcr.io/tylerhendrickson/tarclone:latest   # recommend pinning to a real tag/sha instead of `latest`
+    container_name: backup
+    restart: unless-stopped
+
+    # Minimal privileges: non-root, no capabilities
+    user: "1500:1500"                           # must be able to read every file in the backup path
+    security_opt: ["no-new-privileges=true"]
+    cap_drop: ["ALL"]
+    cap_add: ["DAC_READ_SEARCH"]                # lets the script detect and alert on unreadable files
+    read_only: true                             # rootfs is read-only; writable scratch comes from tmpfs below
+
+    environment:
+      HOME: /tmp                               # writable rclone cache/config home (see tmpfs below)
+      TARCLONE_STAGING_DIR: /staging           # writable archive scratch (see tmpfs below)
+      RCLONE_CONFIG: /run/secrets/rclone_conf  # rclone reads the remote from the secret
+      TARCLONE_SOURCE: /backup-source          # in-container path of the source (mounted below)
+    env_file:
+      - ./tarclone.env                          # non-secret config (remote, retention, ...)
+
+    volumes:
+      - /path/to/source:/backup-source:ro   # THE SOURCE — mount the data to archive, must match $TARCLONE_SOURCE
+      - ./crontab:/etc/backup/crontab:ro    # schedule; edit + restart
+      - /etc/localtime:/etc/localtime:ro    # local time without tzdata in the image
+
+      # Only if you point rclone at an HTTPS backend (S3/B2/WebDAV/Drive) that needs certs:
+      # - /etc/ssl/certs:/etc/ssl/certs:ro
+
+    # Writable scratch. With a read-only rootfs these must exist; tmpfs keeps
+    # them in RAM. Size /staging for one full archive; use a disk-backed volume
+    # for /staging instead if your archives are too large for RAM.
+    tmpfs:
+      - /staging:size=512m,uid=1500,gid=1500,mode=0700    # archive scratch + default lock location
+      - /tmp:size=16m,uid=1500,gid=1500,mode=0700         # rclone scratch (HOME)
+
+    secrets:
+      - rclone_conf
+
+    ports:
+      - "9746:9746"   # Prometheus scrape target (/metrics)
+
+secrets:
+  rclone_conf:
+    file: ./rclone.conf   # host file

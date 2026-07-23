@@ -21,4 +21,4 @@
 !/test/smoke.sh
 
 # Example files
-!/example/
+!/example/*
