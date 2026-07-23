@@ -84,9 +84,10 @@ See the `docker-compose.yml` example to get started. You'll want to bind-mount t
 - `crontab`: Defines the cron (via Supercronic) schedule. Copy from [`example/crontab`](./example/crontab) to get started.
 - `tarclone.env`: Config lives here. Copy from [`example/tarclone.env`](./example/tarclone.env) to get started.
 - `rclone.conf`: Normal `rclone` config file. Copy from [`example/rclone.conf`](./example/rclone.conf) to get started.
-  > [!IMPORTANT]
-  > The `RCLONE_CONFIG` env var **must** be set in the container and point to this file's in-container path,
-  > e.g. `/run/secrets/rclone_conf`.
+
+> [!IMPORTANT]
+> The `RCLONE_CONFIG` env var **must** be set in the container and point to `rclone.conf`'s in-container path,
+> e.g. `/run/secrets/rclone_conf`.
 
 #### Run It
 
