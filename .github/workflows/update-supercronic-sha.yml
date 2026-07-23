@@ -1,0 +1,83 @@
+name: Update supercronic SHA
+
+# Renovate bumps SUPERCRONIC_VERSION in the Dockerfile but cannot refresh the
+# per-arch SHA1 pins (no datasource yields release-asset checksums). This
+# workflow recomputes them on the Renovate PR and offers them as a committable
+# review suggestion — accepting it creates a user commit that re-triggers CI, so
+# the Dockerfile's `sha1sum -c` step validates the new pins. No PAT required.
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+
+permissions:
+  contents: read
+
+jobs:
+  suggest-sha:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.actor == 'renovate[bot]'
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo-and-containers: true
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: sha
+        name: Recompute per-arch SHA1s
+        run: |
+          set -euo pipefail
+          ver=$(grep -oP '(?<=^ARG SUPERCRONIC_VERSION=)\S+' Dockerfile)
+
+          # Discover every pinned arch from the Dockerfile rather than hardcoding
+          # the list: each `ARG SUPERCRONIC_SHA1_<ARCH>=` suffix, lowercased, is
+          # the supercronic release-asset arch (AMD64->amd64, 386->386, ARM->arm).
+          # Adding a new arch ARG is picked up here with no workflow change.
+          mapfile -t suffixes < <(grep -oP '(?<=^ARG SUPERCRONIC_SHA1_)\w+(?==)' Dockerfile)
+          if [ "${#suffixes[@]}" -eq 0 ]; then
+            echo "no ARG SUPERCRONIC_SHA1_* pins found in Dockerfile" >&2
+            exit 1
+          fi
+
+          tmp=$(mktemp -d)
+          pins='{}'
+          for suffix in "${suffixes[@]}"; do
+            arch=$(printf '%s' "$suffix" | tr '[:upper:]' '[:lower:]')
+            curl -fsSL --retry 3 -o "$tmp/$arch" \
+              "https://github.com/aptible/supercronic/releases/download/${ver}/supercronic-linux-${arch}"
+            sum=$(sha1sum "$tmp/$arch" | cut -d' ' -f1)
+            echo "supercronic ${ver}: ${arch}=${sum}"
+            pins=$(jq -c --arg k "$suffix" --arg v "$sum" '. + {($k): $v}' <<<"$pins")
+          done
+
+          # Emit the ARG-suffix -> SHA1 map for the write step (keys keep their
+          # original case so they match the ARG names, e.g. AMD64/ARM64/386).
+          echo "pins=$pins" >> "$GITHUB_OUTPUT"
+
+      - name: Update Dockerfile pins
+        # Rewrite the pins in place; action-suggester turns the resulting diff
+        # into a committable review suggestion. No diff means nothing to post.
+        env:
+          PINS: ${{ steps.sha.outputs.pins }}
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key) \(.value)"' <<<"$PINS" | \
+          while read -r suffix sum; do
+            sed -i "s|^ARG SUPERCRONIC_SHA1_${suffix}=.*|ARG SUPERCRONIC_SHA1_${suffix}=${sum}|" Dockerfile
+          done
+
+      - name: Suggest SHA update
+        # filter_mode: diff_context — the SHA ARGs aren't changed by Renovate
+        # (only the version line is), so they live in the diff's context, not its
+        # added lines. The default `added` mode would suppress the suggestion.
+        uses: reviewdog/action-suggester@2558ba17e65a9039e73764a73009fc05fef28a46 # v1.24.3
+        with:
+          tool_name: supercronic-sha
+          filter_mode: diff_context
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}

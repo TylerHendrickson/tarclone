@@ -1,0 +1,287 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo-and-containers: true
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            release-assets.githubusercontent.com:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: ShellCheck
+        uses: reviewdog/action-shellcheck@4c07458293ac342d477251099501a718ae5ef86e # v1.32.0
+        with:
+          reporter: local
+          fail_level: any
+          # `tarclone` is extensionless, so name it alongside the default *.sh
+          # glob or it silently falls out of lint coverage.
+          pattern: "*.sh tarclone"
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo-and-containers: true
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            release-assets.githubusercontent.com:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install rclone
+        uses: AnimMouse/setup-rclone@26ef2133e09fd383329a1d4c1fbe6a71db1976c9 # v1.12.0
+
+      - name: Smoke test (host)
+        run: ./test/smoke.sh
+
+  build:
+    # Build both variants for both arches, push them to a throwaway job-local
+    # registry, and smoke-test the EXACT multi-arch image (host arch) that will
+    # be published — not a separate load-only build. On a push to main the tested
+    # manifest is then copied to GHCR under the immutable sha-<gitsha> tag that
+    # release.yml promotes, digest preserved, so the released image is the one CI
+    # tested. Pull requests run the same build+test but stop before GHCR (the
+    # local registry needs no credentials, so fork PRs test the real image too).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs:
+      - lint
+      - test
+    permissions:
+      packages: write
+      # Sign build provenance + SBOM as OCI referrer attestations keyed to the
+      # published digest (id-token for the Sigstore signing identity).
+      attestations: write
+      id-token: write
+      # Upload Trivy scan results to the repo's code-scanning (Security) tab.
+      security-events: write
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    strategy:
+      matrix:
+        include:
+          - target: base
+            suffix: ""
+          - target: http-client
+            suffix: -http-client
+    env:
+      # Throwaway ref in the job-local registry: the build is pushed here and
+      # tested, then copied to GHCR under the real tags.
+      LOCAL_IMAGE: localhost:5000/tarclone:${{ matrix.target }}
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo: true
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          # buildkit runs in its own container; share the host network so it can
+          # reach the registry service published on localhost:5000.
+          driver-opts: network=host
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+            suffix=${{ matrix.suffix }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=edge,enable={{is_default_branch}}
+
+      - name: Build and push to local registry (multi-arch)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.LOCAL_IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Emit a plain multi-arch index (no attestation manifests) so the
+          # imagetools copy below reproduces exactly what was tested.
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+      - name: Image smoke — CLI flags & variant
+        run: |
+          docker run --rm --entrypoint /usr/local/bin/tarclone "$LOCAL_IMAGE" --help >/dev/null
+          # curl is only in the http-client variant; base must report it missing
+          # when a ping URL is configured.
+          if [ "${{ matrix.target }}" = "http-client" ]; then
+            docker run --rm -e TARCLONE_PING_URL=https://example.test/ping \
+              --entrypoint /usr/local/bin/tarclone "$LOCAL_IMAGE" --check
+          else
+            ! docker run --rm -e TARCLONE_PING_URL=https://example.test/ping \
+              --entrypoint /usr/local/bin/tarclone "$LOCAL_IMAGE" --check
+          fi
+
+      - name: Image smoke — backup round-trip
+        run: TARCLONE_IMAGE="$LOCAL_IMAGE" ./test/smoke.sh
+
+      # Scan the exact image we just tested (and are about to publish) for known
+      # OS/package vulnerabilities. Runs on PRs too — a vulnerable base image is
+      # caught before merge, not after it ships. TRIVY_INSECURE lets Trivy pull
+      # from the plaintext job-local registry.
+      - name: Scan image for vulnerabilities (SARIF)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_INSECURE: "true"
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE }}
+          format: sarif
+          output: trivy-results.sarif
+          # Keep code scanning actionable — only fixable high/critical.
+          severity: HIGH,CRITICAL
+          # severity applies to SARIF only with limit-severities-for-sarif;
+          limit-severities-for-sarif: true
+          # ignore-unfixed drops unfixable base-image CVEs that would otherwise block every PR
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+
+      # Surface findings in the repo's Security tab. Skipped on fork PRs, whose
+      # read-only token can't write security events; the failing gate below still
+      # runs, so forks are still blocked on fixable criticals.
+      - name: Upload scan results to GitHub Security
+        if: >-
+          github.event_name == 'push' ||
+          github.event.pull_request.head.repo.fork == false
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        with:
+          sarif_file: trivy-results.sarif
+          # Distinct category per variant, or the two matrix legs overwrite each
+          # other's results in the Security tab.
+          category: trivy-${{ matrix.target }}
+
+      # Enforcement: fail only on CRITICALs that have a fix available, so a
+      # freshly-disclosed-but-unfixable CVE doesn't wedge every build. Anything
+      # accepted or not-applicable is documented in .trivyignore.
+      - name: Fail on fixable CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_INSECURE: "true"
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish tested image to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SRC: ${{ env.LOCAL_IMAGE }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          # Copy the exact tested manifest from the local registry to GHCR under
+          # the sha/edge tags. imagetools preserves the digest, so what
+          # release.yml later promotes is byte-for-byte what CI tested.
+          args=()
+          while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
+          docker buildx imagetools create "${args[@]}" "$SRC"
+
+      # Supply-chain attestations. These attach as OCI referrers keyed to the
+      # image DIGEST, not a tag — so because promote preserves the digest, they
+      # automatically cover the version tags release.yml later creates, with no
+      # release-time work. Referrers also leave the image index untouched, unlike
+      # buildx's inline provenance/sbom, so the clean imagetools copy above holds.
+      - name: Resolve published digest
+        id: digest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SRC: ${{ env.LOCAL_IMAGE }}
+        run: |
+          # imagetools copied SRC to GHCR byte-for-byte, so the local index digest
+          # is the GHCR digest. subject-name must be the lowercased GHCR repo.
+          digest="$(docker buildx imagetools inspect "$SRC" --format '{{.Manifest.Digest}}')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "name=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.digest.outputs.name }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate SBOM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.LOCAL_IMAGE }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest SBOM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ steps.digest.outputs.name }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+  gha-workflow-security:
+    name: GHA Workflow Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo-and-containers: true
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Ensure GitHub action versions are pinned to SHAs
+        uses: zgosalvez/github-actions-ensure-sha-pinned-actions@ca46236c6ce584ae24bc6283ba8dcf4b3ec8a066 # v5.0.4

@@ -8,17 +8,29 @@
 !/.gitignore
 !/LICENSE
 !/README.md
+!/SECURITY.md
+!/CONTRIBUTING.md
 
 # Editor config
+!.editorconfig
 !/.vscode/extensions.json
 !/.vscode/settings.json
 
 # Actual source files
 !/Dockerfile
-!/tarclone.sh
+!/tarclone
+
+# Security scanning
+!/.trivyignore
 
 # Tests
 !/test/smoke.sh
 
 # Example files
-!/example/
+!/example/*
+
+# CI/CD workflows
+!.github/workflows/*.yml
+
+# Renovate config
+!/.github/renovate.json5

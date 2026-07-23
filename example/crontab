@@ -1,0 +1,4 @@
+# supercronic crontab (schedule only); bind-mounted, so edits apply on restart.
+# `timeout` is an intentional backstop: it caps a stalled run and releases the
+# lock for the next one. Tune the schedule and the cap to your data.
+0 4 * * * timeout --kill-after=30s 1800 /usr/local/bin/tarclone
