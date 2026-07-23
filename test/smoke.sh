@@ -75,10 +75,12 @@ run_tarclone() {
 run_tarclone --check       >/dev/null || fail "--check exited non-zero"
 run_tarclone --show-config >/dev/null || fail "--show-config exited non-zero"
 # A directly-set ping URL is the operator's choice to put in the environment, so
-# --show-config prints it verbatim (it is tarclone's `env`).
-if ! TARCLONE_PING_URL="https://example.test/ping-token" run_tarclone --show-config | grep -q ping-token; then
-  fail "--show-config did not report the configured ping URL"
-fi
+# --show-config prints it verbatim (it is tarclone's `env`). Capture the dump
+# before grepping: piping into `grep -q` closes the pipe on first match, which
+# SIGPIPEs the still-writing producer and, under pipefail, spuriously fails.
+url_dump="$(TARCLONE_PING_URL="https://example.test/ping-token" run_tarclone --show-config)"
+grep -q ping-token <<<"$url_dump" \
+  || fail "--show-config did not report the configured ping URL"
 # A ping URL supplied via *_FILE must be reported as its path, never resolved —
 # the secret contents must not leak into the dump.
 secret_file="${work}/ping-secret"
