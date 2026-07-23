@@ -46,11 +46,10 @@ jobs:
 
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        env:
-          # A pure re-tag can't rewrite the image config labels frozen at CI build time,
-          # so carry version/source/licenses as index annotations.
-          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
+          # Only the release tag names are needed here — the image's metadata
+          # (description, licenses, source, ...) is already baked into the index by
+          # CI, and promote re-tags that index verbatim.
           images: ${{ env.IMAGE }}
           flavor: |
             latest=auto
@@ -59,8 +58,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-          labels: |
-            org.opencontainers.image.licenses=MIT
 
       - name: Promote sha-<gitsha> to release tags
         env:
