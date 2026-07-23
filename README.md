@@ -187,11 +187,12 @@ TARCLONE_PING_URL_FAILURE=https://hc-ping.com/<uuid>/fail    # optional
 Pings are best-effort and never change the backup's exit code.
 Requires the `-http-client` image variant, which bundles `curl` for the pings.
 
-#### TLS certificates (only for HTTPS backends)
+#### TLS certificates
 
 To keep images small and to reduce churn, images ship without TLS certificates.
 If you ever point rclone at an HTTPS backend (S3, B2, WebDAV, Drive),
-bind-mount your certificate store into the container, e.g.:
+or if you configure any heartbeat/start/failure pings that target `https://` URLs,
+you should bind-mount your certificate store into the container, e.g.:
 - `docker run -v /etc/ssl/certs:/etc/ssl/certs:ro ...`
 - In your `docker-compose.yml` service: `volumes: [/etc/ssl/certs:/etc/ssl/certs:ro]`
 
@@ -215,6 +216,9 @@ gh attestation verify oci://ghcr.io/tylerhendrickson/tarclone:latest --owner Tyl
   back to compare sha256, then server-side renames to the final name — so no
   reader or filesystem snapshot ever sees a half-written file. The local copy is
   deleted only after that verification.
+- **Full snapshots, not incremental.** Every run writes a complete, standalone `tar.gz`
+  (no deduplication or diffing across runs). Each archive restores by itself
+  with just `tar`. Note: this means remote usage scales with `(retention count) × (archive size)`.
 - **Contention is an error.** If a previous run still holds the lock, a new run
   exits non-zero.
 - **Retention** keeps the newest `TARCLONE_RETENTION_COUNT` of the `<prefix>_*` archives.
@@ -223,12 +227,18 @@ gh attestation verify oci://ghcr.io/tylerhendrickson/tarclone:latest --owner Tyl
 
 ## Restoring Backups
 
-Simply download an archive from the share and extract it:
+Download an archive from the share and extract it into the **parent** of the
+original source directory — the archive stores the source dir itself as its top
+level (e.g. `important-stuff/...`), so it recreates that directory for you:
 
 ```bash
-# recreates /path/to/important-stuff with original permissions, numeric ownership, symlinks, etc.
-sudo tar -xzf important-stuff_2026-06-22_040000.tar.gz -C /path/to/important-stuff
+# recreates /path/to/important-stuff with original permissions, numeric ownership, ACLs, xattrs, and symlinks
+sudo tar --numeric-owner --acls --xattrs -xpzf important-stuff_2026-06-22_040000.tar.gz -C /path/to
 ```
+
+> [!TIP]
+> `sudo` and the `--numeric-owner --acls --xattrs` flags faithfully restore ownership and metadata.
+> They can be omitted if you only need the file contents.
 
 ## License
 
