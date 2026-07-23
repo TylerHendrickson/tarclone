@@ -1,0 +1,36 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    'docker:enableMajor',
+    'docker:pinDigests',
+    ':dependencyDashboard',
+    ':semanticCommits',
+    'helpers:pinGitHubActionDigests',
+  ],
+  schedule: ['before 4am'],
+  // The root Dockerfile pins supercronic with a "# renovate:" hint before the
+  // ARG. Renovate's shared presets only match docker/*/Dockerfile paths, so a
+  // repo with a root Dockerfile needs its own matcher to bump SUPERCRONIC_VERSION.
+  // (Renovate can't refresh the per-arch SUPERCRONIC_SHA1 pins — no datasource
+  // yields release-asset checksums — so the update-supercronic-sha workflow
+  // recomputes them on the PR as a committable suggestion; the checksum build
+  // step fails loudly if a bump lands with stale pins.)
+  customManagers: [
+    {
+      customType: 'regex',
+      fileMatch: ['(^|/)Dockerfile$'],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\S*_VERSION=(?<currentValue>\\S+)',
+      ],
+    },
+  ],
+  packageRules: [
+    {
+      description: 'Automerge GitHub Actions digest/minor/patch updates',
+      matchManagers: ['github-actions'],
+      matchUpdateTypes: ['digest', 'minor', 'patch'],
+      automerge: true,
+    },
+  ],
+}
