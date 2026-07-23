@@ -125,7 +125,7 @@ Scrape it:
 
 ```yaml
 scrape_configs:
-  - job_name: backup-cron
+  - job_name: tarclone
     static_configs:
       - targets: ["YOUR_DOCKER_HOST:9746"]
 ```
@@ -144,17 +144,17 @@ Monitoring examples:
 ```
 # 1. No successful backup in 26h (heartbeat). increase() is reset-aware, so a
 #    normal container restart won't false-positive.
-- alert: BackupNoRecentSuccess
-  expr: increase(supercronic_success_total{command=~".*backup.*"}[26h]) == 0
+- alert: TarcloneNoRecentSuccess
+  expr: increase(supercronic_success_total{command=~".*tarclone.*"}[26h]) == 0
   for: 30m
 
 # 2. A run explicitly failed (includes lock-contention "prior run stuck" and timeouts).
-- alert: BackupRunFailed
-  expr: increase(supercronic_fail_total{command=~".*backup.*"}[26h]) > 0
+- alert: TarcloneRunFailed
+  expr: increase(supercronic_fail_total{command=~".*tarclone.*"}[26h]) > 0
 
 # 3. supercronic / container / host is down — counters can't speak to this.
-- alert: BackupExporterDown
-  expr: up{job="backup-cron"} == 0
+- alert: TarcloneExporterDown
+  expr: up{job="tarclone"} == 0
   for: 15m
 ```
 
