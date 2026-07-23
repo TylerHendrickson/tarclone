@@ -72,9 +72,15 @@ $ cp example/rclone.conf rclone.conf
 # configure tarclone in your environment:
 $ cp example/tarclone.env tarclone.env
 $ set -a; source tarclone.env; set +a
+# at minimum, these two config values are required:
+export TARCLONE_REMOTE=my-remote-destination \
+  TARCLONE_SOURCE=/path/to/important/stuff
 # run tarclone:
-$ TARCLONE_SOURCE=/path/to/important-stuff ./tarclone
+$ ./tarclone
 ```
+
+Congratulations!
+You now have a backup of `/path/to/important/stuff` in your rclone remote named `my-remote-destination`.
 
 ### Running in Docker
 
@@ -86,8 +92,9 @@ See the `docker-compose.yml` example to get started. You'll want to bind-mount t
 - `rclone.conf`: Normal `rclone` config file. Copy from [`example/rclone.conf`](./example/rclone.conf) to get started.
 
 > [!IMPORTANT]
-> The `RCLONE_CONFIG` env var **must** be set in the container and point to `rclone.conf`'s in-container path,
-> e.g. `/run/secrets/rclone_conf`.
+> Because `rclone.conf` is mounted as a secret (a non-default path), `RCLONE_CONFIG` **must** point rclone
+> at it, e.g. `/run/secrets/rclone_conf` — see the compose example. Mount it at rclone's default location
+> instead and you can omit `RCLONE_CONFIG`.
 
 #### Run It
 
