@@ -114,6 +114,11 @@ jobs:
 
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          # Target annotations at the manifest-list index — GHCR reads the package
+          # description (and source/revision) from the index, and the publish step
+          # copies them onto it. Mirrors release.yml.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: ${{ env.IMAGE }}
           flavor: |
@@ -216,12 +221,15 @@ jobs:
         env:
           SRC: ${{ env.LOCAL_IMAGE }}
           TAGS: ${{ steps.meta.outputs.tags }}
+          ANNOTATIONS: ${{ steps.meta.outputs.annotations }}
         run: |
           # Copy the exact tested manifest from the local registry to GHCR under
           # the sha/edge tags. imagetools preserves the digest, so what
-          # release.yml later promotes is byte-for-byte what CI tested.
+          # release.yml later promotes is byte-for-byte what CI tested. Annotations
+          # (description, source, revision) are applied to the copied index.
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
+          while IFS= read -r a; do [ -n "$a" ] && args+=(--annotation "$a"); done <<< "$ANNOTATIONS"
           docker buildx imagetools create "${args[@]}" "$SRC"
 
       # Supply-chain attestations. These attach as OCI referrers keyed to the
