@@ -137,6 +137,12 @@ jobs:
           push: true
           tags: ${{ env.LOCAL_IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Bake annotations into the built index so its digest already includes
+          # them. The GHCR copy below is then a verbatim re-tag (no --annotation),
+          # keeping the local and published digests identical — which is what the
+          # attestations key to. (Stamping annotations during the copy instead
+          # would rewrite the index and change its digest.)
+          annotations: ${{ steps.meta.outputs.annotations }}
           # Emit a plain multi-arch index (no attestation manifests) so the
           # imagetools copy below reproduces exactly what was tested.
           provenance: false
@@ -221,15 +227,13 @@ jobs:
         env:
           SRC: ${{ env.LOCAL_IMAGE }}
           TAGS: ${{ steps.meta.outputs.tags }}
-          ANNOTATIONS: ${{ steps.meta.outputs.annotations }}
         run: |
           # Copy the exact tested manifest from the local registry to GHCR under
-          # the sha/edge tags. imagetools preserves the digest, so what
-          # release.yml later promotes is byte-for-byte what CI tested. Annotations
-          # (description, source, revision) are applied to the copied index.
+          # the sha/edge tags — a verbatim re-tag (annotations are already baked
+          # into the built index above). imagetools preserves the digest, so what
+          # release.yml later promotes is byte-for-byte what CI tested and attested.
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
-          while IFS= read -r a; do [ -n "$a" ] && args+=(--annotation "$a"); done <<< "$ANNOTATIONS"
           docker buildx imagetools create "${args[@]}" "$SRC"
 
       # Supply-chain attestations. These attach as OCI referrers keyed to the
@@ -241,13 +245,15 @@ jobs:
         id: digest
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
-          SRC: ${{ env.LOCAL_IMAGE }}
+          SUFFIX: ${{ matrix.suffix }}
         run: |
-          # imagetools copied SRC to GHCR byte-for-byte, so the local index digest
-          # is the GHCR digest. subject-name must be the lowercased GHCR repo.
-          digest="$(docker buildx imagetools inspect "$SRC" --format '{{.Manifest.Digest}}')"
+          # Resolve the digest from the published GHCR image (not the local build):
+          # attestations must key to the digest that actually exists in the registry,
+          # so we read reality rather than assume the copy preserved it.
+          name="${IMAGE,,}"
+          digest="$(docker buildx imagetools inspect "${name}:sha-${GITHUB_SHA}${SUFFIX}" --format '{{.Manifest.Digest}}')"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "name=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

@@ -46,11 +46,10 @@ jobs:
 
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        env:
-          # A pure re-tag can't rewrite the image config labels frozen at CI build time,
-          # so carry version/source/licenses as index annotations.
-          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
+          # Only the release tag names are needed here — the image's metadata
+          # (description, licenses, source, ...) is already baked into the index by
+          # CI, and promote re-tags that index verbatim.
           images: ${{ env.IMAGE }}
           flavor: |
             latest=auto
@@ -59,16 +58,18 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-          labels: |
-            org.opencontainers.image.licenses=MIT
 
       - name: Promote sha-<gitsha> to release tags
         env:
-          SRC: ${{ env.IMAGE }}:sha-${{ github.sha }}${{ matrix.suffix }}
           TAGS: ${{ steps.meta.outputs.tags }}
-          ANNOTATIONS: ${{ steps.meta.outputs.annotations }}
+          SUFFIX: ${{ matrix.suffix }}
         run: |
+          # Verbatim re-tag of the exact image CI built, tested, and attested: no
+          # --annotation, so the digest is preserved and the release tags share the
+          # tested digest and its attestations. The semver lives in the tag name;
+          # the index's version annotation stays sha-<gitsha> (its true provenance).
+          # env.IMAGE embeds the owner verbatim (mixed-case); GHCR refs need lowercase.
+          src="${IMAGE,,}:sha-${GITHUB_SHA}${SUFFIX}"
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
-          while IFS= read -r a; do [ -n "$a" ] && args+=(--annotation "$a"); done <<< "$ANNOTATIONS"
-          docker buildx imagetools create "${args[@]}" "$SRC"
+          docker buildx imagetools create "${args[@]}" "$src"
