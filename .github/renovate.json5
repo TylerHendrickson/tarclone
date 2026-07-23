@@ -37,9 +37,10 @@
       enabled: false,
     },
     {
-      description: 'Automerge GitHub Actions digest/minor/patch updates',
+      description: 'Bundle + automerge GitHub Actions non-major updates',
       matchManagers: ['github-actions'],
       matchUpdateTypes: ['digest', 'minor', 'patch'],
+      groupName: 'github-actions',
       automerge: true,
     },
   ],
