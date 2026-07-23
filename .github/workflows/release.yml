@@ -64,11 +64,14 @@ jobs:
 
       - name: Promote sha-<gitsha> to release tags
         env:
-          SRC: ${{ env.IMAGE }}:sha-${{ github.sha }}${{ matrix.suffix }}
           TAGS: ${{ steps.meta.outputs.tags }}
           ANNOTATIONS: ${{ steps.meta.outputs.annotations }}
+          SUFFIX: ${{ matrix.suffix }}
         run: |
+          # env.IMAGE embeds the owner verbatim (mixed-case), but GHCR refs must be
+          # lowercase — normalize before constructing the source ref.
+          src="${IMAGE,,}:sha-${GITHUB_SHA}${SUFFIX}"
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
           while IFS= read -r a; do [ -n "$a" ] && args+=(--annotation "$a"); done <<< "$ANNOTATIONS"
-          docker buildx imagetools create "${args[@]}" "$SRC"
+          docker buildx imagetools create "${args[@]}" "$src"
