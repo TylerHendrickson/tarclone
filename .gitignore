@@ -15,7 +15,7 @@
 
 # Actual source files
 !/Dockerfile
-!/tarclone.sh
+!/tarclone
 
 # Tests
 !/test/smoke.sh

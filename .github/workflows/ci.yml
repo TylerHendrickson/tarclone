@@ -26,6 +26,9 @@ jobs:
         with:
           reporter: local
           fail_level: any
+          # `tarclone` is extensionless, so name it alongside the default *.sh
+          # glob or it silently falls out of lint coverage.
+          pattern: "*.sh tarclone"
 
   test:
     runs-on: ubuntu-latest
@@ -112,15 +115,15 @@ jobs:
 
       - name: Image smoke — CLI flags & variant
         run: |
-          docker run --rm --entrypoint /usr/local/bin/tarclone.sh "$LOCAL_IMAGE" --help >/dev/null
+          docker run --rm --entrypoint /usr/local/bin/tarclone "$LOCAL_IMAGE" --help >/dev/null
           # curl is only in the http-client variant; base must report it missing
           # when a ping URL is configured.
           if [ "${{ matrix.target }}" = "http-client" ]; then
             docker run --rm -e TARCLONE_PING_URL=https://example.test/ping \
-              --entrypoint /usr/local/bin/tarclone.sh "$LOCAL_IMAGE" --check
+              --entrypoint /usr/local/bin/tarclone "$LOCAL_IMAGE" --check
           else
             ! docker run --rm -e TARCLONE_PING_URL=https://example.test/ping \
-              --entrypoint /usr/local/bin/tarclone.sh "$LOCAL_IMAGE" --check
+              --entrypoint /usr/local/bin/tarclone "$LOCAL_IMAGE" --check
           fi
 
       - name: Image smoke — backup round-trip

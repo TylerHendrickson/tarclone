@@ -13,7 +13,7 @@ don't want to mess with what works) and want an easy way to make periodic
 
 In other words, it's ideal for home labs and other stacks built on little more than
 Docker atop a minimally-customized OS. The point is painless recovery: if your host
-(or its disk) fails, you can restore a recent `tarclone` backup on a fresh machine to
+(or its disk) fails, you can restore a recent tarclone backup on a fresh machine to
 get the same Docker Compose stack running again — without reconfiguring cron or
 installing anything on the host OS beyond Docker itself.
 
@@ -23,12 +23,12 @@ need ad-hoc backups, it works fine as a simple standalone backup solution.
 It pairs well with tools like Ansible or Packer: provision a host with Docker Compose,
 ship your `docker-compose.yml` alongside your other project files, and tarclone backs
 up the data your containerized stack writes. To restore, provision a fresh host the
-same way and unpack a recent `tarclone` backup.
+same way and unpack a recent tarclone backup.
 
-In short, `tarclone` backs up your entire Docker Compose stack (and runs *in* that same stack)
+In short, tarclone backs up your entire Docker Compose stack (and runs *in* that same stack)
 for maximum portability.
 
-`tarclone` doesn't try to reinvent the wheel. It's essentially duct tape around
+tarclone doesn't try to reinvent the wheel. It's essentially duct tape around
 well-established tools — `tar` for archiving, `rclone` for moving the result offsite —
 wrapped in a pleasant experience for running it periodically in Docker (via Supercronic),
 with metrics for observability included by default.
@@ -38,7 +38,7 @@ with metrics for observability included by default.
 ### Prerequisites
 
 To run outside Docker, you need a Linux host with the following installed:
-- `tarclone.sh`
+- `tarclone`
 - `bash` 4.4 or newer
 - [`rclone`](https://rclone.org/), installed and configured
 - GNU `tar` (uses `--numeric-owner`, `--acls`, `--xattrs`) and `gzip` (or set `TARCLONE_COMPRESS_PROG`)
@@ -49,28 +49,31 @@ These typically ship by default on mainstream Linux distributions.
 Non-GNU platforms (macOS/BSD) aren't officially supported for bare-metal use;
 for those environments, run the Docker image instead, which bundles everything.
 
-Run `tarclone.sh --check` to verify the required commands are present, or
-`tarclone.sh --show-config` to print the resolved configuration; see
-`tarclone.sh --help` for all options.
+Run `tarclone --check` to verify the required commands are present,
+or `tarclone --show-config` to print the resolved configuration;
+see `tarclone --help` for all options.
 
 ### Configuration
 
-`tarclone.sh` reads all of its config from the environment.
+`tarclone` reads all of its config from the environment.
 See [`example/tarclone.env`](./example/tarclone.env) for the available variables.
 To load them from a file, you must export it before running,
 e.g. `set -a; source tarclone.env; set +a` or another tool/convention that loads env vars from a file.
 
 Additionally, if you don't already have one, you'll need to create your own `rclone.conf` file
 in order to configure the rclone target named by the `TARCLONE_REMOTE` environment variable,
-which controls where `tarclone.sh` will copy your backups using rclone.
+which controls where `tarclone` will copy your backups using rclone.
 
 ### Quickstart example
 
 ```shell
-$ cp example/rclone.conf rclone.conf    # refer to rclone for help configuring your rclone target
-$ cp example/tarclone.env tarclone.env  # or reference the example file and set env vars directly
-$ set -a; source tarclone.env; set +a   # export the vars defined in the file
-$ ./tarclone.sh
+# configure rclone:
+$ cp example/rclone.conf rclone.conf
+# configure tarclone in your environment:
+$ cp example/tarclone.env tarclone.env
+$ set -a; source tarclone.env; set +a
+# run tarclone:
+$ TARCLONE_SOURCE=/path/to/important-stuff ./tarclone
 ```
 
 ### Running in Docker
@@ -81,7 +84,6 @@ See the `docker-compose.yml` example to get started. You'll want to bind-mount t
 - `crontab`: Defines the cron (via Supercronic) schedule. Copy from [`example/crontab`](./example/crontab) to get started.
 - `tarclone.env`: Config lives here. Copy from [`example/tarclone.env`](./example/tarclone.env) to get started.
 - `rclone.conf`: Normal `rclone` config file. Copy from [`example/rclone.conf`](./example/rclone.conf) to get started.
-
   > [!IMPORTANT]
   > The `RCLONE_CONFIG` env var **must** be set in the container and point to this file's in-container path,
   > e.g. `/run/secrets/rclone_conf`.
@@ -97,7 +99,7 @@ docker compose logs -f tarclone
 Trigger an immediate run without waiting for schedule:
 
 ```bash
-docker compose exec tarclone /usr/local/bin/tarclone.sh
+docker compose exec tarclone /usr/local/bin/tarclone
 ```
 
 Confirm a dated `<prefix>_<timestamp>.tar.gz` lands on the share.

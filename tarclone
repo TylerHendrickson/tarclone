@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # ----------------------------------------------------------------------------------
-# tarclone.sh — dated, rotating tar.gz snapshots of a directory to an rclone remote.
+# tarclone — dated, rotating tar.gz snapshots of a directory to an rclone remote.
 # ----------------------------------------------------------------------------------
 
 set -euo pipefail
@@ -9,7 +9,7 @@ umask 077
 
 usage() {
   cat <<'EOF'
-Usage: tarclone.sh [OPTION]
+Usage: tarclone [OPTION]
 
 Create a dated, rotating tar.gz snapshot of a directory and upload it to an
 rclone remote. Configuration is read entirely from the environment; see the

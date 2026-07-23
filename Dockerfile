@@ -38,8 +38,8 @@ FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8
 
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 COPY --from=fetch  /usr/local/bin/supercronic /usr/local/bin/supercronic
-COPY tarclone.sh /usr/local/bin/tarclone.sh
-RUN chmod 0755 /usr/local/bin/rclone /usr/local/bin/supercronic /usr/local/bin/tarclone.sh \
+COPY tarclone /usr/local/bin/tarclone
+RUN chmod 0755 /usr/local/bin/rclone /usr/local/bin/supercronic /usr/local/bin/tarclone \
  && mkdir -p /etc/backup
 
 # Default to a non-root user. This is only the default: override at runtime with

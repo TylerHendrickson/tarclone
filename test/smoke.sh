@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 #
-# Smoke test: exercise tarclone.sh end-to-end against a local rclone remote
+# Smoke test: exercise tarclone end-to-end against a local rclone remote
 # (no network) and assert the important guarantees hold — the archive is
 # published, it round-trips, retention is enforced, and --show-config reports
 # the resolved configuration.
 #
 # Two modes:
-#   - host  (default):      runs ./tarclone.sh directly; needs rclone + GNU
+#   - host  (default):      runs ./tarclone directly; needs rclone + GNU
 #                           tar/flock on the host.
-#   - image (TARCLONE_IMAGE=<ref>): runs tarclone.sh inside that image via
+#   - image (TARCLONE_IMAGE=<ref>): runs tarclone inside that image via
 #                           docker, so the built image itself is exercised. Only
 #                           docker + GNU tar are needed on the host.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-tarclone="${here}/../tarclone.sh"
+tarclone="${here}/../tarclone"
 image="${TARCLONE_IMAGE:-}"
 
 work="$(mktemp -d)"
@@ -59,7 +59,7 @@ run_tarclone() {
     return
   fi
   docker run --rm \
-    --entrypoint /usr/local/bin/tarclone.sh \
+    --entrypoint /usr/local/bin/tarclone \
     --user "$(id -u):$(id -g)" \
     --network none \
     -e HOME="$work" \
