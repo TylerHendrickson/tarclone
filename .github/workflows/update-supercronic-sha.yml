@@ -16,8 +16,9 @@ permissions:
 
 jobs:
   suggest-sha:
-    if: github.actor == 'renovate[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.actor == 'renovate[bot]'
     permissions:
       pull-requests: write
     steps:

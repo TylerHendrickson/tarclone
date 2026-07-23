@@ -19,6 +19,7 @@ jobs:
     # re-tag the exact multi-arch image CI already built and pushed as sha-<gitsha> (build-once, promote).
     # The tagged commit must have been built on main, or the source image won't exist and this fails loudly.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
