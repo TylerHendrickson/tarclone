@@ -12,6 +12,7 @@
 !/CONTRIBUTING.md
 
 # Editor config
+!.editorconfig
 !/.vscode/extensions.json
 !/.vscode/settings.json
 
