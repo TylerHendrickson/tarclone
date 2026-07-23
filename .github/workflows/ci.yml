@@ -160,7 +160,12 @@ jobs:
           image-ref: ${{ env.LOCAL_IMAGE }}
           format: sarif
           output: trivy-results.sarif
+          # Keep code scanning actionable — only fixable high/critical.
           severity: HIGH,CRITICAL
+          # severity applies to SARIF only with limit-severities-for-sarif;
+          limit-severities-for-sarif: true
+          # ignore-unfixed drops unfixable base-image CVEs that would otherwise block every PR
+          ignore-unfixed: true
           trivyignores: .trivyignore
 
       # Surface findings in the repo's Security tab. Skipped on fork PRs, whose
