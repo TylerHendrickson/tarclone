@@ -1,5 +1,5 @@
 services:
-  backup:
+  tarclone:
     image: ghcr.io/tylerhendrickson/tarclone:latest   # recommend pinning to a real tag/sha instead of `latest`
     container_name: backup
     restart: unless-stopped
