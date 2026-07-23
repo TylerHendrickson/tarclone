@@ -49,6 +49,9 @@ jobs:
     # tested. Pull requests run the same build+test but stop before GHCR (the
     # local registry needs no credentials, so fork PRs test the real image too).
     runs-on: ubuntu-latest
+    needs:
+      - lint
+      - test
     permissions:
       packages: write
     services:
