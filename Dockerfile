@@ -8,8 +8,9 @@ FROM rclone/rclone:1.74.4@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505c
 ###############################################################################
 # Stage 2 — supercronic
 #   Renovate bumps SUPERCRONIC_VERSION; the update-supercronic-sha workflow
-#   refreshes the two SHA1 ARGs below on the same PR as a committable review
-#   suggestion. The checksum build step fails loudly if a bump leaves them stale.
+#   refreshes the per-arch SHA1 ARGs below on the same PR as a committable review
+#   suggestion (it discovers them by name, so a new arch ARG is picked up
+#   automatically). The checksum build step fails loudly if a bump leaves them stale.
 ###############################################################################
 FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df AS fetch
 # renovate: datasource=github-releases depName=aptible/supercronic

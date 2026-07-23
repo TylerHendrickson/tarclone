@@ -32,88 +32,51 @@ jobs:
         run: |
           set -euo pipefail
           ver=$(grep -oP '(?<=^ARG SUPERCRONIC_VERSION=)\S+' Dockerfile)
-          cur_amd=$(grep -oP '(?<=^ARG SUPERCRONIC_SHA1_AMD64=)\S+' Dockerfile)
-          cur_arm=$(grep -oP '(?<=^ARG SUPERCRONIC_SHA1_ARM64=)\S+' Dockerfile)
-          line_amd=$(grep -n '^ARG SUPERCRONIC_SHA1_AMD64=' Dockerfile | cut -d: -f1)
-          line_arm=$(grep -n '^ARG SUPERCRONIC_SHA1_ARM64=' Dockerfile | cut -d: -f1)
 
-          # The suggestion replaces the inclusive line range AMD64..ARM64, so it
-          # is only correct if those ARGs are adjacent and in that order. Bail
-          # loudly rather than post a suggestion spanning unintended lines.
-          if [ "$line_arm" -ne "$((line_amd + 1))" ]; then
-            echo "SUPERCRONIC_SHA1 ARGs must be adjacent (AMD64 then ARM64); got lines ${line_amd} and ${line_arm}" >&2
+          # Discover every pinned arch from the Dockerfile rather than hardcoding
+          # the list: each `ARG SUPERCRONIC_SHA1_<ARCH>=` suffix, lowercased, is
+          # the supercronic release-asset arch (AMD64->amd64, 386->386, ARM->arm).
+          # Adding a new arch ARG is picked up here with no workflow change.
+          mapfile -t suffixes < <(grep -oP '(?<=^ARG SUPERCRONIC_SHA1_)\w+(?==)' Dockerfile)
+          if [ "${#suffixes[@]}" -eq 0 ]; then
+            echo "no ARG SUPERCRONIC_SHA1_* pins found in Dockerfile" >&2
             exit 1
           fi
 
           tmp=$(mktemp -d)
-          for arch in amd64 arm64; do
+          pins='{}'
+          for suffix in "${suffixes[@]}"; do
+            arch=$(printf '%s' "$suffix" | tr '[:upper:]' '[:lower:]')
             curl -fsSL --retry 3 -o "$tmp/$arch" \
               "https://github.com/aptible/supercronic/releases/download/${ver}/supercronic-linux-${arch}"
+            sum=$(sha1sum "$tmp/$arch" | cut -d' ' -f1)
+            echo "supercronic ${ver}: ${arch}=${sum}"
+            pins=$(jq -c --arg k "$suffix" --arg v "$sum" '. + {($k): $v}' <<<"$pins")
           done
-          new_amd=$(sha1sum "$tmp/amd64" | cut -d' ' -f1)
-          new_arm=$(sha1sum "$tmp/arm64" | cut -d' ' -f1)
 
-          {
-            echo "line_amd=$line_amd"
-            echo "line_arm=$line_arm"
-            echo "new_amd=$new_amd"
-            echo "new_arm=$new_arm"
-          } >> "$GITHUB_OUTPUT"
+          # Emit the ARG-suffix -> SHA1 map for the write step (keys keep their
+          # original case so they match the ARG names, e.g. AMD64/ARM64/386).
+          echo "pins=$pins" >> "$GITHUB_OUTPUT"
 
-          if [ "$new_amd" = "$cur_amd" ] && [ "$new_arm" = "$cur_arm" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "SHA1 pins already match ${ver}; nothing to suggest."
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "SHA1 pins are stale for ${ver}; will suggest an update."
-          fi
-
-      - name: Post / clear suggestion
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      - name: Update Dockerfile pins
+        # Rewrite the pins in place; action-suggester turns the resulting diff
+        # into a committable review suggestion. No diff means nothing to post.
         env:
-          CHANGED: ${{ steps.sha.outputs.changed }}
-          LINE_AMD: ${{ steps.sha.outputs.line_amd }}
-          LINE_ARM: ${{ steps.sha.outputs.line_arm }}
-          NEW_AMD: ${{ steps.sha.outputs.new_amd }}
-          NEW_ARM: ${{ steps.sha.outputs.new_arm }}
+          PINS: ${{ steps.sha.outputs.pins }}
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key) \(.value)"' <<<"$PINS" | \
+          while read -r suffix sum; do
+            sed -i "s|^ARG SUPERCRONIC_SHA1_${suffix}=.*|ARG SUPERCRONIC_SHA1_${suffix}=${sum}|" Dockerfile
+          done
+
+      - name: Suggest SHA update
+        # filter_mode: diff_context — the SHA ARGs aren't changed by Renovate
+        # (only the version line is), so they live in the diff's context, not its
+        # added lines. The default `added` mode would suppress the suggestion.
+        uses: reviewdog/action-suggester@2558ba17e65a9039e73764a73009fc05fef28a46 # v1.24.3
         with:
-          script: |
-            const marker = '<!-- supercronic-sha -->';
-            const { owner, repo } = context.repo;
-            const pull_number = context.payload.pull_request.number;
-
-            // Drop any prior suggestion from us — stale or already resolved.
-            const existing = await github.paginate(github.rest.pulls.listReviewComments, {
-              owner, repo, pull_number,
-            });
-            for (const c of existing) {
-              if (c.user.type === 'Bot' && c.body.includes(marker)) {
-                await github.rest.pulls.deleteReviewComment({ owner, repo, comment_id: c.id });
-              }
-            }
-
-            if (process.env.CHANGED !== 'true') return;
-
-            const suggestion = [
-              `ARG SUPERCRONIC_SHA1_AMD64=${process.env.NEW_AMD}`,
-              `ARG SUPERCRONIC_SHA1_ARM64=${process.env.NEW_ARM}`,
-            ].join('\n');
-            const body = [
-              marker,
-              'Recomputed supercronic SHA1 pins for the bumped version. Accept to commit — CI will re-verify via `sha1sum -c`.',
-              '',
-              '```suggestion',
-              suggestion,
-              '```',
-            ].join('\n');
-
-            await github.rest.pulls.createReviewComment({
-              owner, repo, pull_number,
-              commit_id: context.payload.pull_request.head.sha,
-              path: 'Dockerfile',
-              start_line: Number(process.env.LINE_AMD),
-              line: Number(process.env.LINE_ARM),
-              start_side: 'RIGHT',
-              side: 'RIGHT',
-              body,
-            });
+          tool_name: supercronic-sha
+          filter_mode: diff_context
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
