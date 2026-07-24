@@ -25,13 +25,12 @@
       ],
     },
     {
-      // ci.yml pins rclone for the host-mode smoke test as a plain env var with
-      // a "# renovate:" hint. github-releases tags are v-prefixed; strip it so
-      // the bumped value matches the bare RCLONE_VERSION.
+      // ci.yml pins rclone for the smoke test as a step env var with a "# renovate:" hint.
+      // github-releases tags are v-prefixed; strip it so the bumped value matches the bare RCLONE_VERSION.
       customType: 'regex',
       managerFilePatterns: ['/^\\.github/workflows/ci\\.yml$/'],
       matchStrings: [
-        '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+RCLONE_VERSION:\\s*(?<currentValue>\\S+)',
+        '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+INSTALL_RCLONE_VERSION:\\s*(?<currentValue>\\S+)',
       ],
       extractVersionTemplate: '^v(?<version>.+)$',
     },
