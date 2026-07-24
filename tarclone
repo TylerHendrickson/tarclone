@@ -8,7 +8,7 @@ set -euo pipefail
 umask 077
 
 # Source of truth for the release version; bumped by release-please (do not edit by hand).
-readonly TARCLONE_VERSION="0.0.0" # x-release-please-version
+readonly TARCLONE_VERSION="0.1.0" # x-release-please-version
 
 usage() {
   cat <<'EOF'
