@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
 
 permissions:
   contents: read
@@ -15,9 +15,36 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          disable-sudo-and-containers: true
+          egress-policy: audit
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            release-assets.githubusercontent.com:443
+
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   promote:
-    # re-tag the exact multi-arch image CI already built and pushed as sha-<gitsha> (build-once, promote).
-    # The tagged commit must have been built on main, or the source image won't exist and this fails loudly.
+    # Only after release-please actually cut a release. github.sha here is the
+    # release-PR merge commit — exactly the sha-<gitsha> image CI built on this same
+    # push — so the promote source is correct and the build-once guarantee holds.
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -48,16 +75,18 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           # Only the release tag names are needed here — the image's metadata
-          # (description, licenses, source, ...) is already baked into the index by
-          # CI, and promote re-tags that index verbatim.
+          # (description, licenses, source, version, ...) is already baked into the
+          # index by CI, and promote re-tags that index verbatim. The version comes
+          # from release-please's tag_name output, not the git ref (this runs on a
+          # branch push, so there's no tag ref to read).
           images: ${{ env.IMAGE }}
           flavor: |
             latest=auto
             suffix=${{ matrix.suffix }},onlatest=true
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern={{version}},value=${{ needs.release-please.outputs.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.release-please.outputs.tag_name }}
+            type=semver,pattern={{major}},value=${{ needs.release-please.outputs.tag_name }}
 
       - name: Promote sha-<gitsha> to release tags
         env:
@@ -66,10 +95,27 @@ jobs:
         run: |
           # Verbatim re-tag of the exact image CI built, tested, and attested: no
           # --annotation, so the digest is preserved and the release tags share the
-          # tested digest and its attestations. The semver lives in the tag name;
-          # the index's version annotation stays sha-<gitsha> (its true provenance).
+          # tested digest and its attestations. The semver lives in the tag name and
+          # is also baked into the index's version annotation at build (read from the
+          # tarclone script), so it rides this verbatim copy for free.
           # env.IMAGE embeds the owner verbatim (mixed-case); GHCR refs need lowercase.
           src="${IMAGE,,}:sha-${GITHUB_SHA}${SUFFIX}"
+
+          # The main build of this same commit may still be pushing sha-<gitsha> when
+          # we start (CI and this workflow both trigger on the merge). Wait (bounded)
+          # for it rather than failing the race; a genuinely never-built commit still
+          # fails loudly when the wait times out — the build-once guardrail, just
+          # made patient.
+          for _ in $(seq 1 60); do
+            docker buildx imagetools inspect "$src" >/dev/null 2>&1 && break
+            echo "waiting for $src to be published by CI..."
+            sleep 10
+          done
+          if ! docker buildx imagetools inspect "$src" >/dev/null 2>&1; then
+            echo "::error::$src not found after waiting; CI never built this commit, or its build failed" >&2
+            exit 1
+          fi
+
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
           docker buildx imagetools create "${args[@]}" "$src"

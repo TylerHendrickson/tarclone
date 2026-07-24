@@ -7,6 +7,9 @@
 set -euo pipefail
 umask 077
 
+# Source of truth for the release version; bumped by release-please (do not edit by hand).
+readonly TARCLONE_VERSION="0.0.0" # x-release-please-version
+
 usage() {
   cat <<'EOF'
 Usage: tarclone [OPTION]
@@ -17,6 +20,7 @@ bundled example/tarclone.env for the variables and their defaults.
 
 Options:
   -h, --help      Show this help and exit.
+  -V, --version   Show the version and exit.
       --check     Verify the required external commands are present, then exit
                   without running a backup.
       --show-config
@@ -128,6 +132,10 @@ while (($#)); do
   case "$1" in
     -h | --help)
       usage
+      exit 0
+      ;;
+    -V | --version)
+      printf 'tarclone %s\n' "$TARCLONE_VERSION"
       exit 0
       ;;
     --check)

@@ -29,8 +29,8 @@ docker build --target base .
 TARCLONE_IMAGE=<built-ref> ./test/smoke.sh
 ```
 
-Please keep commits focused and use [Conventional Commits](https://www.conventionalcommits.org/)
-(`feat:`, `fix:`, `docs:`, `ci:`, etc.), as the release tooling and history rely on it.
+Please keep commits focused and use [Conventional Commits](https://www.conventionalcommits.org/),
+as the [release tooling](https://github.com/googleapis/release-please) and history rely on it.
 
 ## Reporting bugs and requesting features
 

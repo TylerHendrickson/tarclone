@@ -54,11 +54,12 @@ These typically ship by default on mainstream Linux distributions.
 Non-GNU platforms (macOS/BSD) aren't officially supported for bare-metal use;
 for those environments, run the Docker image instead, which bundles everything.
 
-Run `tarclone --check` to verify the required commands are present,
-or `tarclone --show-config` to print the resolved configuration;
-see `tarclone --help` for all options.
+Run `tarclone --check` to verify the required commands are present.
 
 ### Configuration
+
+> [!TIP]
+> Run `tarclone --show-config` to print the resolved configuration.
 
 `tarclone` reads all of its config from the environment.
 See [`example/tarclone.env`](./example/tarclone.env) for the available variables.
