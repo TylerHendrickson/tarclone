@@ -130,6 +130,12 @@ jobs:
           # reach the registry service published on localhost:5000.
           driver-opts: network=host
 
+      - id: ver
+        name: Read source version
+        # The semver lives in the tarclone script (bumped by release-please), so
+        # it's known at build time and can be baked into the image metadata.
+        run: echo "version=$(grep -oP 'TARCLONE_VERSION="\K[^"]+' tarclone)" >> "$GITHUB_OUTPUT"
+
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         env:
@@ -145,6 +151,15 @@ jobs:
           tags: |
             type=sha,format=long
             type=raw,value=edge,enable={{is_default_branch}}
+          # Pin org.opencontainers.image.version to the source semver instead of
+          # letting it default to the canonical tag (which resolves to `edge`).
+          # The index annotation is derived from this label, so overriding here
+          # flows through to both. No semver tag is pushed on edge builds — tags
+          # stay sha/edge above; only the metadata carries the version. On a
+          # release commit the sha image already carries the real semver, so the
+          # verbatim promote in release.yml inherits a correct image.version.
+          labels: |
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
 
       - name: Build and push to local registry (multi-arch)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
