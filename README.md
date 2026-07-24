@@ -131,7 +131,7 @@ See the `docker-compose.yml` example to get started. You'll want to bind-mount t
 
 #### Run It
 
-```bash
+```shell
 cp example/tarclone.env tarclone.env  # make sure to customize this!
 docker compose up -d
 docker compose logs -f tarclone
@@ -139,7 +139,7 @@ docker compose logs -f tarclone
 
 Trigger an immediate run without waiting for schedule:
 
-```bash
+```shell
 docker compose exec tarclone /usr/local/bin/tarclone
 ```
 
@@ -175,13 +175,13 @@ exec/success/fail counters, an execution-time histogram, labeled by command/posi
 
 Confirm exact names from your own endpoint before pasting into alerts:
 
-```bash
+```shell
 curl -s YOUR_DOCKER_HOST:9746/metrics | grep -E 'supercronic_.*(success|fail|exec)'
 ```
 
 Monitoring examples:
 
-```
+```yaml
 # 1. No successful backup in 26h (heartbeat). increase() is reset-aware, so a
 #    normal container restart won't false-positive.
 - alert: TarcloneNoRecentSuccess
@@ -206,7 +206,7 @@ Monitoring examples:
 For an independent check from outside Prometheus monitoring, set a ping URL (e.g. healthchecks.io).
 The script GETs `TARCLONE_PING_URL` on a successful backup (URLs specifically for start/fail events are also available):
 
-```
+```shell
 TARCLONE_PING_URL=https://hc-ping.com/<uuid>
 TARCLONE_PING_URL_START=https://hc-ping.com/<uuid>/start     # optional
 TARCLONE_PING_URL_FAILURE=https://hc-ping.com/<uuid>/fail    # optional
@@ -231,7 +231,7 @@ and an SPDX SBOM, attached in the registry as OCI referrers keyed to the image d
 
 To verify them with the GitHub CLI:
 
-```bash
+```shell
 gh attestation verify oci://ghcr.io/tylerhendrickson/tarclone:latest --owner TylerHendrickson
 ```
 
@@ -259,7 +259,7 @@ Download an archive from the share and extract it into the **parent** of the
 original source directory — the archive stores the source dir itself as its top
 level (e.g. `important-stuff/...`), so it recreates that directory for you:
 
-```bash
+```shell
 # recreates /path/to/important-stuff with original permissions, numeric ownership, ACLs, xattrs, and symlinks
 sudo tar --numeric-owner --acls --xattrs -xpzf important-stuff_2026-06-22_040000.tar.gz -C /path/to
 ```
