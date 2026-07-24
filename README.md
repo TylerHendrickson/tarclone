@@ -43,7 +43,7 @@ with metrics for observability included by default.
 ### Prerequisites
 
 To run outside Docker, you need a Linux host with the following installed:
-- `tarclone`
+- `tarclone` (see [below](#Install))
 - `bash` 4.4 or newer
 - [`rclone`](https://rclone.org/), installed and configured
 - GNU `tar` (uses `--numeric-owner`, `--acls`, `--xattrs`) and `gzip` (or set `TARCLONE_COMPRESS_PROG`)
@@ -54,7 +54,34 @@ These typically ship by default on mainstream Linux distributions.
 Non-GNU platforms (macOS/BSD) aren't officially supported for bare-metal use;
 for those environments, run the Docker image instead, which bundles everything.
 
-Run `tarclone --check` to verify the required commands are present.
+> [!TIP]
+> Run `tarclone --check` to verify the requirements are present.
+
+### Install
+
+Download tarclone from the latest release:
+
+- Download:
+
+  ```shell
+  curl -fsSLO https://github.com/TylerHendrickson/tarclone/releases/latest/download/tarclone
+  ```
+- Verify (optional):
+
+  ```shell
+  curl -fsSL https://github.com/TylerHendrickson/tarclone/releases/latest/download/checksums.txt | sha256sum --ignore-missing -c -
+  ```
+- System-wide install:
+
+  ```shell
+  sudo install -m 555 tarclone /usr/local/bin/
+  ```
+- Alternative install:
+
+  ```shell
+  chmod 555 tarclone
+  mv tarclone ~/.local/bin/
+  ```
 
 ### Configuration
 
