@@ -4,4 +4,7 @@
 # exception; a bare suppression with no rationale is worse than no suppression.
 #
 # Example:
-#   CVE-2024-00000  # not reachable: <reason>; revisit when a fix is released
+#   CVE-2024-00000  # not reachable: (dep) <reason>; revisit when a fix is released
+
+CVE-2026-39822       # not reachable: (supercronic) reads a trusted crontab and execs, no os.Root on untrusted paths; on latest upstream. Revisit when a build against Go >= 1.26.5 ships.
+GHSA-hrxh-6v49-42gf  # not reachable: (rclone) runs as a CLI copy client, never a gRPC/xDS server; on latest upstream. Revisit when a build against grpc >= 1.82.1 ships.
