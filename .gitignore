@@ -33,6 +33,7 @@
 # CI/CD workflows
 !.github/workflows/*.yml
 !/.release-please-manifest.json
+!/.release-please-config.json
 
 # Renovate config
 !/.github/renovate.json5
