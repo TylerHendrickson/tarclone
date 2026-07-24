@@ -4,7 +4,8 @@
   "include-component-in-tag": false,
   "packages": {
     ".": {
-      "extra-files": ["tarclone"]
+      "extra-files": ["tarclone"],
+      "initial-version": "0.1.0"
     }
   }
 }
