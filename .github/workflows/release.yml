@@ -31,6 +31,8 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            github.com:443
+            uploads.github.com:443
 
       - id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -38,6 +40,35 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - if: ${{ steps.release.outputs.release_created }}
+        name: Fetch release artifacts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /tarclone
+
+      - if: ${{ steps.release.outputs.release_created }}
+        name: Generate release artifacts checksums.txt
+        run: |
+          sha256sum tarclone > checksums.txt
+
+      - if: ${{ steps.release.outputs.release_created }}
+        name: Attach release artifacts and checksums.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          gh release upload "$TAG" tarclone checksums.txt --clobber
+
+      - if: ${{ steps.release.outputs.release_created }}
+        name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          gh release edit "$TAG" --draft=false
 
   promote:
     # Only after release-please actually cut a release. github.sha here is the
