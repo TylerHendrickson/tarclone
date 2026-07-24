@@ -9,20 +9,30 @@
     'helpers:pinGitHubActionDigests',
   ],
   schedule: ['before 4am'],
-  // The root Dockerfile pins supercronic with a "# renovate:" hint before the
-  // ARG. Renovate's shared presets only match docker/*/Dockerfile paths, so a
-  // repo with a root Dockerfile needs its own matcher to bump SUPERCRONIC_VERSION.
-  // (Renovate can't refresh the per-arch SUPERCRONIC_SHA1 pins — no datasource
-  // yields release-asset checksums — so the update-supercronic-sha workflow
-  // recomputes them on the PR as a committable suggestion; the checksum build
-  // step fails loudly if a bump lands with stale pins.)
   customManagers: [
     {
+      // The root Dockerfile pins supercronic with a "# renovate:" hint before the
+      // ARG. Renovate's shared presets only match docker/*/Dockerfile paths, so a
+      // repo with a root Dockerfile needs its own matcher to bump SUPERCRONIC_VERSION.
+      // (Renovate can't refresh the per-arch SUPERCRONIC_SHA1 pins — no datasource
+      // yields release-asset checksums — so the update-supercronic-sha workflow
+      // recomputes them on the PR as a committable suggestion; the checksum build
+      // step fails loudly if a bump lands with stale pins.)
       customType: 'regex',
       managerFilePatterns: ['/(^|/)Dockerfile$/'],
       matchStrings: [
         '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\S*_VERSION=(?<currentValue>\\S+)',
       ],
+    },
+    {
+      // ci.yml pins rclone for the smoke test as a step env var with a "# renovate:" hint.
+      // github-releases tags are v-prefixed; strip it so the bumped value matches the bare RCLONE_VERSION.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github/workflows/ci\\.yml$/'],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+INSTALL_RCLONE_VERSION:\\s*(?<currentValue>\\S+)',
+      ],
+      extractVersionTemplate: '^v(?<version>.+)$',
     },
   ],
   packageRules: [
@@ -42,6 +52,15 @@
       matchUpdateTypes: ['digest', 'minor', 'patch'],
       groupName: 'github-actions',
       automerge: true,
+    },
+    {
+      // rclone lives in two places under the same depName: the digest-pinned
+      // rclone/rclone image in the Dockerfile (docker datasource) and the
+      // host-mode smoke-test binary in ci.yml (github-releases). Group them so a
+      // version bump is one PR, not one per ecosystem.
+      description: 'Bundle rclone bumps across the image and the workflow binary',
+      matchDepNames: ['rclone/rclone'],
+      groupName: 'rclone',
     },
   ],
 }
