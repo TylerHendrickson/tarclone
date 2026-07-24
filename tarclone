@@ -198,6 +198,10 @@ fi
 : "${TARCLONE_PING_URL_FAILURE:=}" # GET on failure
 : "${TARCLONE_PING_TIMEOUT:=10}"
 
+# Require a non-negative integer.
+[[ "$TARCLONE_RETENTION_COUNT" =~ ^[0-9]+$ ]] ||
+  die "TARCLONE_RETENTION_COUNT must be a non-negative integer (got: ${TARCLONE_RETENTION_COUNT})"
+
 # Resolve "<NAME>_FILE" indirection for secret-bearing values. A direct env var,
 # if non-empty, takes precedence over its _FILE counterpart.
 load_file_secret() {
