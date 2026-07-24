@@ -209,6 +209,11 @@ case "$TARCLONE_VERIFY_CHECKSUM" in
   *) die "TARCLONE_VERIFY_CHECKSUM must be true or false (got: ${TARCLONE_VERIFY_CHECKSUM})" ;;
 esac
 
+# Require a positive integer (seconds).
+if ! [[ "$TARCLONE_PING_TIMEOUT" =~ ^[0-9]+$ ]] || ((TARCLONE_PING_TIMEOUT < 1)); then
+  die "TARCLONE_PING_TIMEOUT must be a positive integer (got: ${TARCLONE_PING_TIMEOUT})"
+fi
+
 # Resolve "<NAME>_FILE" indirection for secret-bearing values. A direct env var,
 # if non-empty, takes precedence over its _FILE counterpart.
 load_file_secret() {
