@@ -118,4 +118,47 @@ archives=("$dest"/important-stuff_*.tar.gz)
 ((${#archives[@]} == TARCLONE_RETENTION_COUNT)) ||
   fail "retention: expected ${TARCLONE_RETENTION_COUNT} archives, found ${#archives[@]}"
 
+# --- 4. Foreign files and subdirectories in the destination are left alone -----
+# Regression: a subdirectory in the destination once made the orphaned-.partial
+# cleanup try to `deletefile` it, which aborted an already-published backup. More
+# generally, tarclone must only ever delete objects it could itself have created
+# (<prefix>_<timestamp>.tar.gz, optionally .partial), matched literally — never a
+# subdirectory, an unrelated file, or a look-alike that shares our prefix but has
+# no real timestamp. Such objects must be ignored by both cleanup and retention:
+# never counted, never removed.
+mkdir -p "$dest/keep/nested"
+echo "important" >"$dest/keep/nested/note.txt"
+echo "unrelated" >"$dest/unrelated.txt"
+echo "other app's backup" >"$dest/otherapp_backup.tar.gz"
+# Shares our prefix but is not a real archive; the eight zeros are not the
+# YYYY-MM-DD_HHMMSS shape, and sort before real timestamps so a regression that
+# counted or pruned foreign files would try to delete this one first.
+echo "not a real archive" >"$dest/important-stuff_00000000.tar.gz"
+echo "not a real partial" >"$dest/important-stuff_notatimestamp.tar.gz.partial"
+# A genuinely orphaned partial (our exact naming) must still be reaped, so the
+# hardened cleanup isn't silently over-tightened into doing nothing.
+real_orphan="$dest/important-stuff_2020-01-01_000000.tar.gz.partial"
+echo "orphaned" >"$real_orphan"
+
+sleep 1.1
+run_tarclone || fail "backup run failed with foreign files/subdirs in the destination"
+
+[[ -d "$dest/keep/nested" && -f "$dest/keep/nested/note.txt" ]] ||
+  fail "cleanup disturbed an unrelated subdirectory"
+for decoy in unrelated.txt otherapp_backup.tar.gz important-stuff_00000000.tar.gz \
+  important-stuff_notatimestamp.tar.gz.partial; do
+  [[ -e "$dest/$decoy" ]] || fail "deleted a foreign file it did not create: ${decoy}"
+done
+[[ -e "$real_orphan" ]] && fail "a genuinely orphaned .partial was not cleaned up"
+# Retention counts only real archives, so the look-alike above must not perturb it.
+real_count=0
+for f in "$dest"/important-stuff_*.tar.gz; do
+  base="$(basename -- "$f")"
+  [[ "$base" =~ ^important-stuff_[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])_([01][0-9]|2[0-3])[0-5][0-9]([0-5][0-9]|60)\.tar\.gz$ ]] &&
+    real_count=$((real_count + 1))
+done
+((real_count == TARCLONE_RETENTION_COUNT)) ||
+  fail "retention miscounted with foreign files present: found ${real_count}"
+
+# --- End of tests (everything passed) ------------------------------------------
 echo "SMOKE OK"

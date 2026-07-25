@@ -236,10 +236,22 @@ TARCLONE_SOURCE="${TARCLONE_SOURCE%/}"
 SOURCE_PARENT="$(dirname -- "$TARCLONE_SOURCE")"
 SOURCE_NAME="$(basename -- "$TARCLONE_SOURCE")" # == top-level dir inside the archive
 : "${TARCLONE_ARCHIVE_PREFIX:=$SOURCE_NAME}"
+# The prefix becomes part of archive/lock file names, so reject only what would
+# break path handling or the line-based listing parse: a path separator and
+# control characters.
+case "$TARCLONE_ARCHIVE_PREFIX" in
+  */*) die "TARCLONE_ARCHIVE_PREFIX must not contain '/'" ;;
+esac
+[[ "$TARCLONE_ARCHIVE_PREFIX" == *[[:cntrl:]]* ]] &&
+  die "TARCLONE_ARCHIVE_PREFIX must not contain control characters"
 : "${TARCLONE_LOCK_FILE:=${TARCLONE_STAGING_DIR%/}/backup-${TARCLONE_ARCHIVE_PREFIX}.lock}"
 
+# Leading part of every archive name: "<prefix>_" when a prefix is set, empty
+# otherwise — so an empty prefix drops the separator rather than leaving a bare
+# leading "_". is_own_archive_name uses the same value, so the two can't drift.
+ARCHIVE_LEAD="${TARCLONE_ARCHIVE_PREFIX:+${TARCLONE_ARCHIVE_PREFIX}_}"
 TIMESTAMP="$(date +%Y-%m-%d_%H%M%S)"
-ARCHIVE_NAME="${TARCLONE_ARCHIVE_PREFIX}_${TIMESTAMP}.tar.gz"
+ARCHIVE_NAME="${ARCHIVE_LEAD}${TIMESTAMP}.tar.gz"
 LOCAL_ARCHIVE="${TARCLONE_STAGING_DIR%/}/${ARCHIVE_NAME}"
 
 if [[ -n "$TARCLONE_REMOTE_PATH" ]]; then
@@ -337,11 +349,30 @@ preflight_readable() {
 # remote housekeeping below, where a failure signals a real problem worth an alert.
 cleanup_orphaned_local() {
   local f
-  for f in "${TARCLONE_STAGING_DIR%/}/${TARCLONE_ARCHIVE_PREFIX}"_*.tar.gz; do
+  for f in "${TARCLONE_STAGING_DIR%/}"/*.tar.gz; do
     [[ -e "$f" ]] || continue # no matches: the glob stays literal, so skip it
+    # Select by predicate, not by a prefix glob, so a prefix containing glob
+    # metacharacters can't over- or under-match; only our own archives are removed.
+    is_own_archive_name "$(basename -- "$f")" || continue
     log_info "Removing orphaned local staging archive: ${f}"
     rm -f -- "$f" || log_warn "could not remove orphaned staging archive: ${f}"
   done
+}
+
+# true if a file name is one that this configuration could itself have written,
+# else false. The prefix and suffixes are stripped as literals (so a prefix carrying
+# glob/regex metacharacters is harmless) and only the timestamp is pattern-matched
+# against a fixed layout.
+is_own_archive_name() {
+  local f="$1" suffix="${2:-}"
+  local mid="${f#"$ARCHIVE_LEAD"}"
+  mid="${mid%".tar.gz${suffix}"}"
+  # mid must be a valid %Y-%m-%d_%H%M%S stamp — real month/day/hour/minute/second
+  # ranges, so a look-alike like "..._9999-99-99_999999" is rejected.
+  # Seconds allow 60 for the leap second date(1) can emit.
+  local ts='[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])_([01][0-9]|2[0-3])[0-5][0-9]([0-5][0-9]|60)'
+  [[ "$f" == "${ARCHIVE_LEAD}${mid}.tar.gz${suffix}" ]] &&
+    [[ "$mid" =~ ^${ts}$ ]]
 }
 
 # Remove ".partial" uploads left on the remote by prior runs that were killed
@@ -351,13 +382,13 @@ cleanup_orphaned_local() {
 # Nothing else reaps these — retention only counts *.tar.gz.
 cleanup_orphaned_partials() {
   local listing
-  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.partial")" ||
+  listing="$(rc lsf "$REMOTE_DIR" --files-only --max-depth 1)" ||
     die "cleanup: failed to list remote for orphaned .partial uploads"
   [[ -n "$listing" ]] || return 0
   local f
   while IFS= read -r f; do
     f="${f%/}"
-    [[ -n "$f" ]] || continue
+    is_own_archive_name "$f" .partial || continue
     log_info "Removing orphaned .partial from a prior run: ${f}"
     rc deletefile "${REMOTE_DIR%/}/${f}" || die "cleanup: failed to remove orphaned ${f}"
   done <<<"$listing"
@@ -368,18 +399,22 @@ prune_old() {
     log_info "Retention disabled; keeping all archives"
     return 0
   }
-  # Files only; ".partial" uploads don't match *.tar.gz, so they're never counted.
   local listing
-  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.tar.gz")" ||
+  listing="$(rc lsf "$REMOTE_DIR" --files-only --max-depth 1)" ||
     die "retention: failed to list remote archives for pruning"
+  # Count and prune only our own archives, selected by predicate;
+  # unrelated files (and our ".partial" uploads) are ignored.
   local -a archives=()
-  [[ -n "$listing" ]] && mapfile -t archives < <(LC_ALL=C sort <<<"$listing")
+  local f
+  while IFS= read -r f; do
+    f="${f%/}"
+    is_own_archive_name "$f" && archives+=("$f")
+  done < <(LC_ALL=C sort <<<"$listing")
   local count=${#archives[@]}
   if ((count > TARCLONE_RETENTION_COUNT)); then
-    local remove=$((count - TARCLONE_RETENTION_COUNT)) f
+    local remove=$((count - TARCLONE_RETENTION_COUNT))
     log_info "Pruning ${remove} old archive(s) (keeping newest ${TARCLONE_RETENTION_COUNT} of ${count})"
     for f in "${archives[@]:0:remove}"; do
-      f="${f%/}"
       log_info "  removing ${f}"
       rc deletefile "${REMOTE_DIR%/}/${f}" || die "retention: failed to remove ${f}"
     done
@@ -503,9 +538,9 @@ main() {
   rc moveto "$REMOTE_PARTIAL" "$REMOTE_FINAL"
   UPLOADED_PARTIAL=0
   local published
-  published="$(rc lsf "$REMOTE_DIR" --include "$ARCHIVE_NAME")" ||
+  published="$(rc lsf "$REMOTE_DIR" --files-only --max-depth 1)" ||
     die "could not list remote to confirm publish"
-  [[ -n "$published" ]] || die "final archive missing after publish"
+  grep -Fxq -- "$ARCHIVE_NAME" <<<"$published" || die "final archive missing after publish"
   log_info "Published ${ARCHIVE_NAME}"
 
   cleanup_orphaned_partials
