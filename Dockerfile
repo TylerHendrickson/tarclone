@@ -41,15 +41,14 @@ COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 COPY --from=fetch  /usr/local/bin/supercronic /usr/local/bin/supercronic
 COPY tarclone /usr/local/bin/tarclone
 RUN chmod 0755 /usr/local/bin/rclone /usr/local/bin/supercronic /usr/local/bin/tarclone \
- && mkdir -p /etc/backup
+ && mkdir -p /etc/tarclone
 
 # Default to a non-root user. This is only the default: override at runtime with
-# `docker run --user` or compose `user:` (must be able to read the backup
-# source), no rebuild required.
+# `docker run --user` or compose `user:`.
 USER 1500:1500
 
 EXPOSE 9746
-ENTRYPOINT ["/usr/local/bin/supercronic", "-prometheus-listen-address", "0.0.0.0:9746", "/etc/backup/crontab"]
+ENTRYPOINT ["/usr/local/bin/supercronic", "-prometheus-listen-address", "0.0.0.0:9746", "/etc/tarclone/crontab"]
 
 ###############################################################################
 # http-client — extends base with curl for external heartbeat pings (TARCLONE_PING_URL).

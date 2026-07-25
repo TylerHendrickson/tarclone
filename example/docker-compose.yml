@@ -21,7 +21,7 @@ services:
 
     volumes:
       - /path/to/source:/backup-source:ro   # THE SOURCE — mount the data to archive, must match $TARCLONE_SOURCE
-      - ./crontab:/etc/backup/crontab:ro    # schedule; edit + restart
+      - ./crontab:/etc/tarclone/crontab:ro  # schedule; edit + restart
       - /etc/localtime:/etc/localtime:ro    # local time without tzdata in the image
 
       # Only if you point rclone at an HTTPS backend (S3/B2/WebDAV/Drive) that needs certs:
