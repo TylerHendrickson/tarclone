@@ -67,6 +67,7 @@ run_tarclone() {
     --network none \
     -e HOME="$work" \
     -e TARCLONE_SOURCE -e TARCLONE_REMOTE -e TARCLONE_REMOTE_PATH -e RCLONE_CONFIG \
+    -e TARCLONE_ARCHIVE_PREFIX \
     -e TARCLONE_STAGING_DIR -e TARCLONE_RETENTION_COUNT -e TARCLONE_VERIFY_CHECKSUM \
     -e TARCLONE_PING_URL="${TARCLONE_PING_URL:-}" \
     -e TARCLONE_PING_URL_FILE="${TARCLONE_PING_URL_FILE:-}" \
@@ -159,6 +160,32 @@ for f in "$dest"/important-stuff_*.tar.gz; do
 done
 ((real_count == TARCLONE_RETENTION_COUNT)) ||
   fail "retention miscounted with foreign files present: found ${real_count}"
+
+# --- 5. A prefix containing glob metacharacters is handled literally -----------
+# The prefix is operator-configurable and may legally contain glob metacharacters.
+# Every use of it must be literal, never a pattern — otherwise selecting what to
+# delete could match, and remove, an unrelated file.
+meta_dest="${work}/remote-meta"
+mkdir -p "$meta_dest"
+# If "app[1]" were ever expanded as a glob, its [1] class would match "app1_...",
+# so this decoy must survive untouched.
+decoy="${meta_dest}/app1_2020-01-01_000000.tar.gz"
+echo "decoy" >"$decoy"
+
+export TARCLONE_ARCHIVE_PREFIX='app[1]'
+export TARCLONE_REMOTE_PATH="$meta_dest"
+# Three runs against retention=2 so pruning actually deletes with this prefix.
+for i in 1 2 3; do
+  sleep 1.1
+  run_tarclone || fail "backup run failed with a metacharacter prefix (run ${i})"
+done
+
+# Retention keeps exactly N, selected by the literal prefix (the test's own glob
+# single-quotes [1] so it, too, matches literally rather than as a class).
+metas=("$meta_dest"/'app[1]'_*.tar.gz)
+((${#metas[@]} == TARCLONE_RETENTION_COUNT)) ||
+  fail "metachar prefix: expected ${TARCLONE_RETENTION_COUNT} archives, found ${#metas[@]}"
+[[ -e "$decoy" ]] || fail "metachar prefix matched as a glob and deleted the app1_* decoy"
 
 # --- End of tests (everything passed) ------------------------------------------
 echo "SMOKE OK"
