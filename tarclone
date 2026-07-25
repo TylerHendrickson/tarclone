@@ -236,11 +236,14 @@ TARCLONE_SOURCE="${TARCLONE_SOURCE%/}"
 SOURCE_PARENT="$(dirname -- "$TARCLONE_SOURCE")"
 SOURCE_NAME="$(basename -- "$TARCLONE_SOURCE")" # == top-level dir inside the archive
 : "${TARCLONE_ARCHIVE_PREFIX:=$SOURCE_NAME}"
-# The prefix is interpolated into rclone include globs and into archive/lock file
-# names, so restrict it to a safe, filename-friendly charset — no path separators
-# and no glob/regex metacharacters that could widen those listings.
-[[ "$TARCLONE_ARCHIVE_PREFIX" =~ ^[A-Za-z0-9._-]+$ ]] ||
-  die "TARCLONE_ARCHIVE_PREFIX must match ^[A-Za-z0-9._-]+\$ (got: ${TARCLONE_ARCHIVE_PREFIX})"
+# The prefix becomes part of archive/lock file names, so reject only what would
+# break path handling or the line-based listing parse: a path separator and
+# control characters.
+case "$TARCLONE_ARCHIVE_PREFIX" in
+  */*) die "TARCLONE_ARCHIVE_PREFIX must not contain '/'" ;;
+esac
+[[ "$TARCLONE_ARCHIVE_PREFIX" == *[[:cntrl:]]* ]] &&
+  die "TARCLONE_ARCHIVE_PREFIX must not contain control characters"
 : "${TARCLONE_LOCK_FILE:=${TARCLONE_STAGING_DIR%/}/backup-${TARCLONE_ARCHIVE_PREFIX}.lock}"
 
 TIMESTAMP="$(date +%Y-%m-%d_%H%M%S)"
