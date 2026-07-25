@@ -351,7 +351,7 @@ cleanup_orphaned_local() {
 # Nothing else reaps these — retention only counts *.tar.gz.
 cleanup_orphaned_partials() {
   local listing
-  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.partial")" ||
+  listing="$(rc lsf "$REMOTE_DIR" --files-only --max-depth 1 --include "${TARCLONE_ARCHIVE_PREFIX}_*.partial")" ||
     die "cleanup: failed to list remote for orphaned .partial uploads"
   [[ -n "$listing" ]] || return 0
   local f
@@ -370,7 +370,7 @@ prune_old() {
   }
   # Files only; ".partial" uploads don't match *.tar.gz, so they're never counted.
   local listing
-  listing="$(rc lsf "$REMOTE_DIR" --include "${TARCLONE_ARCHIVE_PREFIX}_*.tar.gz")" ||
+  listing="$(rc lsf "$REMOTE_DIR" --files-only --max-depth 1 --include "${TARCLONE_ARCHIVE_PREFIX}_*.tar.gz")" ||
     die "retention: failed to list remote archives for pruning"
   local -a archives=()
   [[ -n "$listing" ]] && mapfile -t archives < <(LC_ALL=C sort <<<"$listing")
@@ -503,7 +503,7 @@ main() {
   rc moveto "$REMOTE_PARTIAL" "$REMOTE_FINAL"
   UPLOADED_PARTIAL=0
   local published
-  published="$(rc lsf "$REMOTE_DIR" --include "$ARCHIVE_NAME")" ||
+  published="$(rc lsf "$REMOTE_DIR" --files-only --max-depth 1 --include "$ARCHIVE_NAME")" ||
     die "could not list remote to confirm publish"
   [[ -n "$published" ]] || die "final archive missing after publish"
   log_info "Published ${ARCHIVE_NAME}"
