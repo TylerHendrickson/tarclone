@@ -344,6 +344,18 @@ cleanup_orphaned_local() {
   done
 }
 
+# true if a file name is one that this configuration could itself have written,
+# else false. The prefix and suffixes are stripped as literals (so a prefix carrying
+# glob/regex metacharacters is harmless) and only the timestamp is pattern-matched
+# against a fixed layout.
+is_own_archive_name() {
+  local f="$1" suffix="${2:-}"
+  local mid="${f#"${TARCLONE_ARCHIVE_PREFIX}_"}"
+  mid="${mid%".tar.gz${suffix}"}"
+  [[ "$f" == "${TARCLONE_ARCHIVE_PREFIX}_${mid}.tar.gz${suffix}" ]] &&
+    [[ "$mid" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}$ ]]
+}
+
 # Remove ".partial" uploads left on the remote by prior runs that were killed
 # (SIGKILL/power loss) before they could publish or clean up. We hold the
 # single-instance lock and our own .partial has already been renamed away by the
@@ -358,6 +370,8 @@ cleanup_orphaned_partials() {
   while IFS= read -r f; do
     f="${f%/}"
     [[ -n "$f" ]] || continue
+    is_own_archive_name "$f" .partial ||
+      die "cleanup: refusing to delete unexpected remote object: ${f}"
     log_info "Removing orphaned .partial from a prior run: ${f}"
     rc deletefile "${REMOTE_DIR%/}/${f}" || die "cleanup: failed to remove orphaned ${f}"
   done <<<"$listing"
@@ -380,6 +394,8 @@ prune_old() {
     log_info "Pruning ${remove} old archive(s) (keeping newest ${TARCLONE_RETENTION_COUNT} of ${count})"
     for f in "${archives[@]:0:remove}"; do
       f="${f%/}"
+      is_own_archive_name "$f" ||
+        die "retention: refusing to delete unexpected remote object: ${f}"
       log_info "  removing ${f}"
       rc deletefile "${REMOTE_DIR%/}/${f}" || die "retention: failed to remove ${f}"
     done
