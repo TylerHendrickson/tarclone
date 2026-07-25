@@ -363,8 +363,12 @@ is_own_archive_name() {
   local f="$1" suffix="${2:-}"
   local mid="${f#"${TARCLONE_ARCHIVE_PREFIX}_"}"
   mid="${mid%".tar.gz${suffix}"}"
+  # mid must be a valid %Y-%m-%d_%H%M%S stamp — real month/day/hour/minute/second
+  # ranges, so a look-alike like "..._9999-99-99_999999" is rejected.
+  # Seconds allow 60 for the leap second date(1) can emit.
+  local ts='[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])_([01][0-9]|2[0-3])[0-5][0-9]([0-5][0-9]|60)'
   [[ "$f" == "${TARCLONE_ARCHIVE_PREFIX}_${mid}.tar.gz${suffix}" ]] &&
-    [[ "$mid" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}$ ]]
+    [[ "$mid" =~ ^${ts}$ ]]
 }
 
 # Remove ".partial" uploads left on the remote by prior runs that were killed

@@ -154,7 +154,7 @@ done
 real_count=0
 for f in "$dest"/important-stuff_*.tar.gz; do
   base="$(basename -- "$f")"
-  [[ "$base" =~ ^important-stuff_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}\.tar\.gz$ ]] &&
+  [[ "$base" =~ ^important-stuff_[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])_([01][0-9]|2[0-3])[0-5][0-9]([0-5][0-9]|60)\.tar\.gz$ ]] &&
     real_count=$((real_count + 1))
 done
 ((real_count == TARCLONE_RETENTION_COUNT)) ||
