@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/TylerHendrickson/tarclone/compare/v0.2.0...v0.2.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* cleanup fails when destination contains subdirectories ([#25](https://github.com/TylerHendrickson/tarclone/issues/25)) ([5b315b5](https://github.com/TylerHendrickson/tarclone/commit/5b315b59cfbc760b0fcb18483467202af21646a5))
+
 ## [0.2.0](https://github.com/TylerHendrickson/tarclone/compare/v0.1.0...v0.2.0) (2026-07-25)
 
 
