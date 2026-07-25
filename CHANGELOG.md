@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/TylerHendrickson/tarclone/compare/v0.1.0...v0.2.0) (2026-07-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* the supercronic crontab path moved from /etc/backup/crontab to /etc/tarclone/crontab. Update your bind mount (compose `volumes:` or `docker run -v ...`) to target the new path.
+
+### Features
+
+* add input validation for config ([#20](https://github.com/TylerHendrickson/tarclone/issues/20)) ([972de45](https://github.com/TylerHendrickson/tarclone/commit/972de450d1faf099030bd52e8b6592f959d9cc61))
+* move container crontab to /etc/tarclone/crontab ([364177b](https://github.com/TylerHendrickson/tarclone/commit/364177b9cf37f2e43dc050735bf0534c92b74d33))
+
 ## 0.1.0 (2026-07-24)
 
 
