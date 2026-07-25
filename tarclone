@@ -351,7 +351,7 @@ cleanup_orphaned_local() {
 # Nothing else reaps these — retention only counts *.tar.gz.
 cleanup_orphaned_partials() {
   local listing
-  listing="$(rc lsf "$REMOTE_DIR" --files-only --max-depth 1 --include "${TARCLONE_ARCHIVE_PREFIX}_*.partial")" ||
+  listing="$(rc lsf "$REMOTE_DIR" --files-only --max-depth 1 --include "${TARCLONE_ARCHIVE_PREFIX}_*.tar.gz.partial")" ||
     die "cleanup: failed to list remote for orphaned .partial uploads"
   [[ -n "$listing" ]] || return 0
   local f
