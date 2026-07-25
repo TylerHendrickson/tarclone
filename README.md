@@ -6,37 +6,24 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 A small, single-purpose script that archives a source directory to a dated, rotating `tar.gz` on any rclone remote.
-Runs natively on GNU Linux; Docker images provided for portability, with out-of-the-box scheduling and Prometheus metrics.
+Great for running scheduled, observable backups in Docker.
 
 ## Why?
 
-I wanted a fully-containerized backup solution that I could ship within a Docker Compose
-stack instead of installing and configuring a scheduled backup service on every host.
-It targets small environments running Docker where you value convenience (or just
-don't want to mess with what works) and want an easy way to make periodic
-(cron-scheduled) offsite backups of your containers' volumes.
-
-In other words, it's ideal for home labs and other stacks built on little more than
-Docker atop a minimally-customized OS. The point is painless recovery: if your host
-(or its disk) fails, you can restore a recent tarclone backup on a fresh machine to
-get the same Docker Compose stack running again — without reconfiguring cron or
-installing anything on the host OS beyond Docker itself.
+tarclone is for small Docker environments — home labs and stacks built on little
+more than Docker atop a stock OS — where you want painless, cron-scheduled offsite
+backups without installing or configuring a backup service on every host. It ships
+*inside* your Docker Compose stack and backs up the data that stack writes, so
+recovery is simple: provision a fresh host with Docker installed, unpack a recent archive,
+done.
 
 Of course, if you don't use containers, prefer to schedule with system cron, or just
-need ad-hoc backups, it works fine as a simple standalone backup solution.
+need ad-hoc backups, it works well as a simple standalone backup solution.
 
-It pairs well with tools like Ansible or Packer: provision a host with Docker Compose,
-ship your `docker-compose.yml` alongside your other project files, and tarclone backs
-up the data your containerized stack writes. To restore, provision a fresh host the
-same way and unpack a recent tarclone backup.
-
-In short, tarclone backs up your entire Docker Compose stack (and runs *in* that same stack)
-for maximum portability.
-
-tarclone doesn't try to reinvent the wheel. It's essentially duct tape around
+tarclone doesn't try to reinvent the wheel. It's essentially plumbing around
 well-established tools — `tar` for archiving, `rclone` for moving the result offsite —
 wrapped in a pleasant experience for running it periodically in Docker (via Supercronic),
-with metrics for observability included by default.
+with metrics for observability (monitor your backup automations!) included by default.
 
 ## How to Use
 
