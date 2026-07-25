@@ -246,8 +246,12 @@ esac
   die "TARCLONE_ARCHIVE_PREFIX must not contain control characters"
 : "${TARCLONE_LOCK_FILE:=${TARCLONE_STAGING_DIR%/}/backup-${TARCLONE_ARCHIVE_PREFIX}.lock}"
 
+# Leading part of every archive name: "<prefix>_" when a prefix is set, empty
+# otherwise — so an empty prefix drops the separator rather than leaving a bare
+# leading "_". is_own_archive_name uses the same value, so the two can't drift.
+ARCHIVE_LEAD="${TARCLONE_ARCHIVE_PREFIX:+${TARCLONE_ARCHIVE_PREFIX}_}"
 TIMESTAMP="$(date +%Y-%m-%d_%H%M%S)"
-ARCHIVE_NAME="${TARCLONE_ARCHIVE_PREFIX}_${TIMESTAMP}.tar.gz"
+ARCHIVE_NAME="${ARCHIVE_LEAD}${TIMESTAMP}.tar.gz"
 LOCAL_ARCHIVE="${TARCLONE_STAGING_DIR%/}/${ARCHIVE_NAME}"
 
 if [[ -n "$TARCLONE_REMOTE_PATH" ]]; then
@@ -361,13 +365,13 @@ cleanup_orphaned_local() {
 # against a fixed layout.
 is_own_archive_name() {
   local f="$1" suffix="${2:-}"
-  local mid="${f#"${TARCLONE_ARCHIVE_PREFIX}_"}"
+  local mid="${f#"$ARCHIVE_LEAD"}"
   mid="${mid%".tar.gz${suffix}"}"
   # mid must be a valid %Y-%m-%d_%H%M%S stamp — real month/day/hour/minute/second
   # ranges, so a look-alike like "..._9999-99-99_999999" is rejected.
   # Seconds allow 60 for the leap second date(1) can emit.
   local ts='[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])_([01][0-9]|2[0-3])[0-5][0-9]([0-5][0-9]|60)'
-  [[ "$f" == "${TARCLONE_ARCHIVE_PREFIX}_${mid}.tar.gz${suffix}" ]] &&
+  [[ "$f" == "${ARCHIVE_LEAD}${mid}.tar.gz${suffix}" ]] &&
     [[ "$mid" =~ ^${ts}$ ]]
 }
 
