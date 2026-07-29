@@ -35,11 +35,14 @@ jobs:
             uploads.github.com:443
 
       - id: release
+        name: Create a new (draft) release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Defer creation of new release-please PR until after the version tag exists:
+          skip-github-pull-request: true
 
       - if: ${{ steps.release.outputs.release_created }}
         name: Fetch release artifacts
@@ -69,6 +72,14 @@ jobs:
           TAG: ${{ steps.release.outputs.tag_name }}
         run: |
           gh release edit "$TAG" --draft=false
+
+      - name: Open or update the next release PR
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
 
   promote:
     # Only after release-please actually cut a release. github.sha here is the
