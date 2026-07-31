@@ -227,10 +227,9 @@ gh attestation verify oci://ghcr.io/tylerhendrickson/tarclone:latest --owner Tyl
 - **Zero downtime.** tar reads the read-only source directly; nothing is stopped.
   For stronger consistency, `TARCLONE_PRE_HOOK`/`TARCLONE_POST_HOOK` can quiesce an app around the
   archive step (the post-hook always runs, even on failure).
-- **Verified upload, atomic publish.** Uploads as `.partial`, optionally reads it
-  back to compare sha256, then server-side renames to the final name — so no
-  reader or filesystem snapshot ever sees a half-written file. The local copy is
-  deleted only after that verification.
+- **Verified upload, atomic publish.** Uploads as `.partial`, optionally verifies
+  it against the local archive, then server-side renames to the final name.
+  The local copy is deleted only after successful verification.
 - **Full snapshots, not incremental.** Every run writes a complete, standalone `tar.gz`
   (no deduplication or diffing across runs). Each archive restores by itself
   with just `tar`. Note: this means remote usage scales with `(retention count) × (archive size)`.
