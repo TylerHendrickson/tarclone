@@ -59,7 +59,7 @@ jobs:
       - name: Install rclone
         env:
           # renovate: datasource=github-releases depName=rclone/rclone
-          INSTALL_RCLONE_VERSION: 1.74.4
+          INSTALL_RCLONE_VERSION: 1.75.0
         run: |
           base="rclone-v${INSTALL_RCLONE_VERSION}-linux-amd64"
           curl -fsSL --proto '=https' --tlsv1.2 -O "https://downloads.rclone.org/v${INSTALL_RCLONE_VERSION}/${base}.zip"
