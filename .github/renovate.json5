@@ -62,5 +62,27 @@
       matchDepNames: ['rclone/rclone'],
       groupName: 'rclone',
     },
+    {
+      // These dependencies are baked into the published image, so their bumps
+      // change what users actually run — surface them in release notes as `deps:`
+      // (a visible release-please changelog section) rather than hiding them as
+      // `chore(deps):`. CI-only dependencies (GitHub Actions) stay the default
+      // `chore` type so they don't add noise to the changelog.
+      description: 'Surface shipped-dependency bumps in release notes',
+      matchDepNames: ['rclone/rclone', 'aptible/supercronic'],
+      semanticCommitType: 'deps',
+      semanticCommitScope: null,
+    },
+    {
+      // The base image ships too, but `docker:pinDigests` produces frequent
+      // digest-only re-pins that would be pure changelog noise. Only real version
+      // moves (e.g. bookworm -> trixie) are noteworthy, so promote those to `deps:`
+      // and leave digest refreshes as the default hidden `chore`.
+      description: 'Surface base-image version bumps, keep digest re-pins as chores',
+      matchDepNames: ['debian'],
+      matchUpdateTypes: ['major', 'minor'],
+      semanticCommitType: 'deps',
+      semanticCommitScope: null,
+    },
   ],
 }

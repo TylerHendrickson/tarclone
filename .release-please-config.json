@@ -5,7 +5,9 @@
   "bump-minor-pre-major": true,
   "packages": {
     ".": {
-      "extra-files": ["tarclone"],
+      "extra-files": [
+        "tarclone"
+      ],
       "initial-version": "0.1.0",
       "draft": true
     }
