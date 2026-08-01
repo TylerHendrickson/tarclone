@@ -187,5 +187,32 @@ metas=("$meta_dest"/'app[1]'_*.tar.gz)
   fail "metachar prefix: expected ${TARCLONE_RETENTION_COUNT} archives, found ${#metas[@]}"
 [[ -e "$decoy" ]] || fail "metachar prefix matched as a glob and deleted the app1_* decoy"
 
+# --- 6. Verification falls back to a download when the backend has no hash ------
+# A crypt remote exposes no hash, so the no-download check can only compare sizes
+# — which passes even on same-length corruption. tarclone must notice that and
+# read the object back to compare bytes before publishing. Layer a crypt remote
+# over the local store and assert a clean run publishes AND took the download path.
+# The password is only ever revealed by the same config that obscured it, so any
+# valid obscured value works; this one reveals to a throwaway test passphrase.
+crypt_enc="${work}/remote-crypt-enc"
+mkdir -p "$crypt_enc"
+{
+  printf '\n[cryptstore]\n'
+  printf 'type = crypt\n'
+  printf 'remote = teststore:%s\n' "$crypt_enc"
+  printf 'password = A4qrsfrfesw-q35KaVC6HCaLa-qRC3Sj9IISYKhQ1Yoo4rgKow\n'
+} >>"$conf"
+
+export TARCLONE_ARCHIVE_PREFIX=crypt
+export TARCLONE_REMOTE=cryptstore
+export TARCLONE_REMOTE_PATH=
+export TARCLONE_STAGING_DIR="${work}/staging-crypt"
+crypt_log="${work}/crypt-run.log"
+run_tarclone >"$crypt_log" 2>&1 || { cat "$crypt_log" >&2; fail "backup run failed against a crypt remote"; }
+grep -q "verifying by download" "$crypt_log" ||
+  fail "crypt remote did not fall back to download verification"
+crypts=("$crypt_enc"/*)
+((${#crypts[@]} >= 1)) || fail "crypt remote published nothing"
+
 # --- End of tests (everything passed) ------------------------------------------
 echo "SMOKE OK"

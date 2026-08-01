@@ -67,7 +67,7 @@ die() {
 # heartbeat ping is configured, so it is checked conditionally. This reads env
 # directly (not the resolved config below) so --check works on a bare host.
 check_dependencies() {
-  local -a required=(rclone tar find flock sha256sum stat date)
+  local -a required=(rclone tar find flock mktemp stat date grep)
   # Compressor: gzip unless an alternate is configured.
   if [[ -n "${TARCLONE_COMPRESS_PROG:-}" ]]; then required+=("$TARCLONE_COMPRESS_PROG"); else required+=(gzip); fi
   local -a missing=()
@@ -185,7 +185,7 @@ fi
 # --- Retention ---
 : "${TARCLONE_RETENTION_COUNT:=10}" # keep newest N; 0 = keep all
 # --- Behavior ---
-: "${TARCLONE_VERIFY_CHECKSUM:=true}"        # read the upload back and compare sha256
+: "${TARCLONE_VERIFY_CHECKSUM:=true}"        # verify the upload matches the local archive
 : "${TARCLONE_COMPRESS_PROG:=}"              # empty => gzip (tar -z); or e.g. "pigz"
 : "${TARCLONE_STAGING_DIR:=${TMPDIR:-/tmp}}" # holds only the archive (not a copy of the source)
 : "${TARCLONE_LOCK_FILE:=}"                  # defaults under STAGING/TMP (set below)
@@ -277,6 +277,7 @@ fi
 
 POST_PENDING=0
 UPLOADED_PARTIAL=0
+VERIFY_DIR=""
 RUN_OK=0
 
 # Dump the configuration and exit (--show-config). Deliberately runs BEFORE the
@@ -296,6 +297,45 @@ done
 # Helpers
 # =============================================================================
 rc() { rclone "${RCLONE_FLAGS[@]}" "$@"; }
+
+# Verify the just-uploaded .partial matches the local archive.
+verify_upload() {
+  # rclone check pairs files by name, but the remote object carries a .partial
+  # suffix the local archive doesn't. Hardlink the local archive under the
+  # matching name (same inode, no copy; same filesystem as staging) so check can
+  # pair them.
+  VERIFY_DIR="$(mktemp -d "${TARCLONE_STAGING_DIR%/}/verify.XXXXXX")" ||
+    die "could not create verification workspace"
+  ln "$LOCAL_ARCHIVE" "${VERIFY_DIR}/${ARCHIVE_NAME}.partial" ||
+    die "could not stage verification hardlink"
+
+  # Restrict check to just our one file (avoid full directory listing on remote).
+  local list="${VERIFY_DIR}/files-from"
+  printf '%s\n' "${ARCHIVE_NAME}.partial" >"$list"
+  local -a check_flags=(--one-way --no-traverse --files-from-raw "$list")
+
+  # rclone check without --download never downloads the body: it compares via a
+  # cheap server-side hash when the backend has one (zero egress), else degrades to
+  # a size-only check. Try that first, and only download when no hash was used.
+  local out
+  if out="$(rc check "${check_flags[@]}" "$VERIFY_DIR" "$REMOTE_DIR" 2>&1)"; then
+    if grep -q 'hashes could not be checked' <<<"$out"; then
+      # The pass was size-only (no usable server-side hash) — not real integrity.
+      # Download and compare bytes, aborting at the first difference.
+      log_info "No server-side hash; verifying by download"
+      rc check "${check_flags[@]}" --download "$VERIFY_DIR" "$REMOTE_DIR" ||
+        die "checksum mismatch after upload"
+    else
+      log_info "Verified via server-side checksum (no download)"
+    fi
+  else
+    die "checksum mismatch after upload"
+  fi
+
+  rm -rf -- "$VERIFY_DIR"
+  VERIFY_DIR=""
+  log_info "Checksum verified"
+}
 
 run_hook() {
   local name="$1" cmd="$2"
@@ -438,6 +478,7 @@ finalize() {
     rc deletefile "$REMOTE_PARTIAL" 2>/dev/null || log_warn "could not remove leftover .partial"
   fi
   rm -f -- "$LOCAL_ARCHIVE" 2>/dev/null || true
+  [[ -n "${VERIFY_DIR:-}" ]] && rm -rf -- "$VERIFY_DIR" 2>/dev/null || true
 
   if [[ "$RUN_OK" -eq 1 ]]; then
     log_info "Backup OK (${ARCHIVE_NAME})"
@@ -518,19 +559,7 @@ main() {
   UPLOADED_PARTIAL=1
 
   if [[ "$TARCLONE_VERIFY_CHECKSUM" == "true" ]]; then
-    # Verification reads the whole archive back from the remote and hashes it
-    # locally — universal across every rclone backend, but it doubles egress on a
-    # large archive. Future optimization: for backends that expose a server-side
-    # checksum, prefer `rclone hashsum sha256` / `rclone check` to compare without
-    # re-downloading, and fall back to this read-back only when the backend can't
-    # hash server-side. Kept simple deliberately until that's worth the branch.
-    log_info "Verifying sha256"
-    local lsum rsum
-    read -r lsum _ < <(sha256sum "$LOCAL_ARCHIVE")
-    rsum="$(rc cat "$REMOTE_PARTIAL" | sha256sum)"
-    rsum="${rsum%% *}"
-    [[ "$lsum" == "$rsum" ]] || die "checksum mismatch after upload"
-    log_info "Checksum verified"
+    verify_upload
   fi
 
   # Publish atomically: server-side rename where the backend supports it.
