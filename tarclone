@@ -309,16 +309,21 @@ verify_upload() {
   ln "$LOCAL_ARCHIVE" "${VERIFY_DIR}/${ARCHIVE_NAME}.partial" ||
     die "could not stage verification hardlink"
 
+  # Restrict check to just our one file (avoid full directory listing on remote).
+  local list="${VERIFY_DIR}/files-from"
+  printf '%s\n' "${ARCHIVE_NAME}.partial" >"$list"
+  local -a check_flags=(--one-way --no-traverse --files-from-raw "$list")
+
   # rclone check without --download never downloads the body: it compares via a
   # cheap server-side hash when the backend has one (zero egress), else degrades to
   # a size-only check. Try that first, and only download when no hash was used.
   local out
-  if out="$(rc check --one-way "$VERIFY_DIR" "$REMOTE_DIR" 2>&1)"; then
+  if out="$(rc check "${check_flags[@]}" "$VERIFY_DIR" "$REMOTE_DIR" 2>&1)"; then
     if grep -q 'hashes could not be checked' <<<"$out"; then
       # The pass was size-only (no usable server-side hash) — not real integrity.
       # Download and compare bytes, aborting at the first difference.
       log_info "No server-side hash; verifying by download"
-      rc check --one-way --download "$VERIFY_DIR" "$REMOTE_DIR" ||
+      rc check "${check_flags[@]}" --download "$VERIFY_DIR" "$REMOTE_DIR" ||
         die "checksum mismatch after upload"
     else
       log_info "Verified via server-side checksum (no download)"
