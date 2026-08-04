@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/TylerHendrickson/tarclone/compare/v0.2.1...v0.3.0) (2026-08-04)
+
+
+### Features
+
+* verify uploads with `rclone check` ([#30](https://github.com/TylerHendrickson/tarclone/issues/30)) ([415b064](https://github.com/TylerHendrickson/tarclone/commit/415b064cd46566b5fe5057b550d1075175486f99))
+
 ## [0.2.1](https://github.com/TylerHendrickson/tarclone/compare/v0.2.0...v0.2.1) (2026-07-25)
 
 
