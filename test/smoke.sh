@@ -187,7 +187,30 @@ metas=("$meta_dest"/'app[1]'_*.tar.gz)
   fail "metachar prefix: expected ${TARCLONE_RETENTION_COUNT} archives, found ${#metas[@]}"
 [[ -e "$decoy" ]] || fail "metachar prefix matched as a glob and deleted the app1_* decoy"
 
-# --- 6. Verification falls back to a download when the backend has no hash ------
+# --- 6. A single prune removes multiple archives in one batched delete ---------
+# Retention deletes all expired archives in one `rclone delete` call, not one call
+# per file.
+batch_dest="${work}/remote-batch"
+mkdir -p "$batch_dest"
+export TARCLONE_ARCHIVE_PREFIX=batch
+export TARCLONE_REMOTE=teststore
+export TARCLONE_REMOTE_PATH="$batch_dest"
+export TARCLONE_STAGING_DIR="${work}/staging-batch"
+# Five old archives (valid <prefix>_<timestamp>.tar.gz names; retention counts by
+# name, not content) plus one fresh run => 6 > retention 2, so a single prune must
+# delete four in one shot.
+for ts in 2020-01-01_000000 2020-01-02_000000 2020-01-03_000000 \
+  2020-01-04_000000 2020-01-05_000000; do
+  echo "old" >"${batch_dest}/batch_${ts}.tar.gz"
+done
+run_tarclone || fail "batched-prune run exited non-zero"
+batched=("$batch_dest"/batch_*.tar.gz)
+((${#batched[@]} == TARCLONE_RETENTION_COUNT)) ||
+  fail "batched prune: expected ${TARCLONE_RETENTION_COUNT} archives, found ${#batched[@]}"
+[[ -e "${batch_dest}/batch_2020-01-01_000000.tar.gz" ]] &&
+  fail "batched prune did not remove the oldest seeded archive"
+
+# --- 7. Verification falls back to a download when the backend has no hash ------
 # A crypt remote exposes no hash, so the no-download check can only compare sizes
 # — which passes even on same-length corruption. tarclone must notice that and
 # read the object back to compare bytes before publishing. Layer a crypt remote
@@ -208,7 +231,10 @@ export TARCLONE_REMOTE=cryptstore
 export TARCLONE_REMOTE_PATH=
 export TARCLONE_STAGING_DIR="${work}/staging-crypt"
 crypt_log="${work}/crypt-run.log"
-run_tarclone >"$crypt_log" 2>&1 || { cat "$crypt_log" >&2; fail "backup run failed against a crypt remote"; }
+run_tarclone >"$crypt_log" 2>&1 || {
+  cat "$crypt_log" >&2
+  fail "backup run failed against a crypt remote"
+}
 grep -q "verifying by download" "$crypt_log" ||
   fail "crypt remote did not fall back to download verification"
 crypts=("$crypt_enc"/*)

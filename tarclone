@@ -439,9 +439,11 @@ prune_old() {
     log_info "Retention disabled; keeping all archives"
     return 0
   }
+
   local listing
   listing="$(rc lsf "$REMOTE_DIR" --files-only --max-depth 1)" ||
     die "retention: failed to list remote archives for pruning"
+
   # Count and prune only our own archives, selected by predicate;
   # unrelated files (and our ".partial" uploads) are ignored.
   local -a archives=()
@@ -450,14 +452,18 @@ prune_old() {
     f="${f%/}"
     is_own_archive_name "$f" && archives+=("$f")
   done < <(LC_ALL=C sort <<<"$listing")
+
   local count=${#archives[@]}
   if ((count > TARCLONE_RETENTION_COUNT)); then
+    # Log and batch-delete expired archive(s)
     local remove=$((count - TARCLONE_RETENTION_COUNT))
-    log_info "Pruning ${remove} old archive(s) (keeping newest ${TARCLONE_RETENTION_COUNT} of ${count})"
-    for f in "${archives[@]:0:remove}"; do
-      log_info "  removing ${f}"
-      rc deletefile "${REMOTE_DIR%/}/${f}" || die "retention: failed to remove ${f}"
-    done
+    local -a expired=("${archives[@]:0:remove}")
+    # Quote and comma-join the names in log output
+    local list
+    printf -v list "'%s', " "${expired[@]}"
+    log_info "Pruning ${remove} old archive(s) (keeping newest ${TARCLONE_RETENTION_COUNT} of ${count}): ${list%, }"
+    printf '%s\n' "${expired[@]}" | rc delete "$REMOTE_DIR" --files-from - ||
+      die "retention: failed to remove one or more old archives"
   else
     log_info "No pruning needed (${count} <= ${TARCLONE_RETENTION_COUNT})"
   fi
