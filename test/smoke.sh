@@ -25,6 +25,13 @@ fail() {
   exit 1
 }
 
+# Announce each test so its output can be told apart from the next test's. Goes to
+# stderr, where tarclone's own logs go, so the banner stays in order with them.
+section() {
+  echo >&2
+  echo "==== TEST $1 ====" >&2
+}
+
 # --- Fixtures -----------------------------------------------------------------
 # A small source tree, including a subdirectory and a symlink, so the round-trip
 # check covers more than plain files.
@@ -76,6 +83,7 @@ run_tarclone() {
 }
 
 # --- 1. Introspection flags succeed and report the resolved config ------------
+section 1
 run_tarclone --check >/dev/null || fail "--check exited non-zero"
 run_tarclone --show-config >/dev/null || fail "--show-config exited non-zero"
 # A directly-set ping URL is the operator's choice to put in the environment, so
@@ -96,6 +104,7 @@ grep -qF "TARCLONE_PING_URL_FILE=${secret_file}" <<<"$file_dump" ||
   fail "--show-config did not report the *_FILE path"
 
 # --- 2. A run publishes exactly one archive that round-trips -------------------
+section 2
 run_tarclone || fail "backup run exited non-zero"
 archives=("$dest"/important-stuff_*.tar.gz)
 ((${#archives[@]} == 1)) || fail "expected 1 published archive, found ${#archives[@]}"
@@ -110,6 +119,7 @@ leftovers=("$dest"/*.partial)
 ((${#leftovers[@]} == 0)) || fail "left a .partial behind: ${leftovers[*]}"
 
 # --- 3. Retention caps the archive count --------------------------------------
+section 3
 # The timestamp has one-second resolution, so pause to guarantee distinct names.
 for i in 1 2; do
   sleep 1.1
@@ -127,6 +137,7 @@ archives=("$dest"/important-stuff_*.tar.gz)
 # subdirectory, an unrelated file, or a look-alike that shares our prefix but has
 # no real timestamp. Such objects must be ignored by both cleanup and retention:
 # never counted, never removed.
+section 4
 mkdir -p "$dest/keep/nested"
 echo "important" >"$dest/keep/nested/note.txt"
 echo "unrelated" >"$dest/unrelated.txt"
@@ -165,6 +176,7 @@ done
 # The prefix is operator-configurable and may legally contain glob metacharacters.
 # Every use of it must be literal, never a pattern — otherwise selecting what to
 # delete could match, and remove, an unrelated file.
+section 5
 meta_dest="${work}/remote-meta"
 mkdir -p "$meta_dest"
 # If "app[1]" were ever expanded as a glob, its [1] class would match "app1_...",
@@ -190,6 +202,7 @@ metas=("$meta_dest"/'app[1]'_*.tar.gz)
 # --- 6. A single prune removes multiple archives in one batched delete ---------
 # Retention deletes all expired archives in one `rclone delete` call, not one call
 # per file.
+section 6
 batch_dest="${work}/remote-batch"
 mkdir -p "$batch_dest"
 export TARCLONE_ARCHIVE_PREFIX=batch
@@ -217,6 +230,7 @@ batched=("$batch_dest"/batch_*.tar.gz)
 # over the local store and assert a clean run publishes AND took the download path.
 # The password is only ever revealed by the same config that obscured it, so any
 # valid obscured value works; this one reveals to a throwaway test passphrase.
+section 7
 crypt_enc="${work}/remote-crypt-enc"
 mkdir -p "$crypt_enc"
 {
