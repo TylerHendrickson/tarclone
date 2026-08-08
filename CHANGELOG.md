@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/TylerHendrickson/tarclone/compare/v0.3.0...v0.4.0) (2026-08-08)
+
+
+### Features
+
+* use batch-delete when pruning multiple archives ([c4aeb66](https://github.com/TylerHendrickson/tarclone/commit/c4aeb66282c2cde26e91ec1d6e5c834a3f30f159))
+
 ## [0.3.0](https://github.com/TylerHendrickson/tarclone/compare/v0.2.1...v0.3.0) (2026-08-04)
 
 
