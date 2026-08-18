@@ -9,6 +9,8 @@
     'helpers:pinGitHubActionDigests',
   ],
   schedule: ['before 4am'],
+  labels: ['dependencies'],
+  addLabels: ['renovate/{{updateType}}'],
   customManagers: [
     {
       // The root Dockerfile pins supercronic with a "# renovate:" hint before the
@@ -83,6 +85,40 @@
       matchUpdateTypes: ['major', 'minor'],
       semanticCommitType: 'deps',
       semanticCommitScope: null,
+    },
+    // Custom labels for renovate PRs:
+    {
+      description: 'Ecosystem: GitHub Actions',
+      matchManagers: ['github-actions'],
+      addLabels: ['deps/github-actions'],
+    },
+    {
+      description: 'Ecosystem: container images',
+      matchDatasources: ['docker'],
+      addLabels: ['deps/docker'],
+    },
+    {
+      description: 'Ecosystem: binaries fetched from release assets',
+      matchDatasources: ['github-releases'],
+      addLabels: ['deps/binary'],
+    },
+    {
+      // NB: supercronic is a github-releases dep, not docker ecosystem,
+      // but it still ships in the docker image
+      description: 'Exposure: ships in the published image',
+      matchFileNames: ['Dockerfile'],
+      addLabels: ['deps/shipped'],
+    },
+    {
+      description: 'Exposure: CI-only',
+      matchFileNames: ['.github/workflows/ci.yml'],
+      matchDatasources: ['github-releases'],
+      addLabels: ['deps/ci'],
+    },
+    {
+      description: 'Exposure: CI-only (actions)',
+      matchManagers: ['github-actions'],
+      addLabels: ['deps/ci'],
     },
   ],
 }
