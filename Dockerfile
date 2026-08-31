@@ -12,7 +12,7 @@ FROM rclone/rclone:1.75.0@sha256:b06aed988cf5967de7c25be5925240983981c757f4ed1ac
 #   suggestion (it discovers them by name, so a new arch ARG is picked up
 #   automatically). The checksum build step fails loudly if a bump leaves them stale.
 ###############################################################################
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS fetch
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS fetch
 # renovate: datasource=github-releases depName=aptible/supercronic
 ARG SUPERCRONIC_VERSION=v0.2.49
 ARG SUPERCRONIC_SHA1_AMD64=e63c11a9726b775a6a11801e81af4f3fb926aa68
@@ -35,7 +35,7 @@ RUN set -eux; \
 # base — lean final image (no HTTP client).
 # Slim base provides GNU tar/gzip/coreutils/util-linux(flock).
 ###############################################################################
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS base
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS base
 
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 COPY --from=fetch  /usr/local/bin/supercronic /usr/local/bin/supercronic
