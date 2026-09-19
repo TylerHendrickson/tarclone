@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: ShellCheck
-        uses: reviewdog/action-shellcheck@0722bbdb0d47f04c1b53b8734d2422ac63a45ec6 # v1.32.1
+        uses: reviewdog/action-shellcheck@0a90156c6e0553996a217f0a9e09be6b0f6bee4c # v1.34.0
         with:
           reporter: local
           fail_level: any
@@ -95,7 +95,7 @@ jobs:
       security-events: write
     services:
       registry:
-        image: registry:3@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33
+        image: registry:3@sha256:fd374bae807c225661adfe2c0c1f9970a0b8fab1761fd7dfb91e0fd9a8748f9b
         ports:
           - 5000:5000
     strategy:
@@ -134,8 +134,8 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           # buildkit runs in its own container; share the host network so it can
           # reach the registry service published on localhost:5000.
@@ -173,7 +173,7 @@ jobs:
             org.opencontainers.image.version=${{ steps.ver.outputs.version }}
 
       - name: Build and push to local registry (multi-arch)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: ${{ matrix.target }}
@@ -236,7 +236,7 @@ jobs:
         if: >-
           github.event_name == 'push' ||
           github.event.pull_request.head.repo.fork == false
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: trivy-results.sarif
           # Distinct category per variant, or the two matrix legs overwrite each
@@ -345,4 +345,4 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Ensure GitHub action versions are pinned to SHAs
-        uses: zgosalvez/github-actions-ensure-sha-pinned-actions@c5fc58bd0be7a4b94b73ce40250322d5b838a108 # v5.0.7
+        uses: zgosalvez/github-actions-ensure-sha-pinned-actions@60e3a74c7b74a319e8e53e46bc455205f7173e1a # v5.0.8
