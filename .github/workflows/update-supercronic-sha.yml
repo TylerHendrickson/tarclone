@@ -80,7 +80,7 @@ jobs:
         # filter_mode: diff_context — the SHA ARGs aren't changed by Renovate
         # (only the version line is), so they live in the diff's context, not its
         # added lines. The default `added` mode would suppress the suggestion.
-        uses: reviewdog/action-suggester@2558ba17e65a9039e73764a73009fc05fef28a46 # v1.24.3
+        uses: reviewdog/action-suggester@c387862ad6765a9729f2b40ee4d8b5769f2145c7 # v1.26.1
         with:
           tool_name: supercronic-sha
           filter_mode: diff_context
